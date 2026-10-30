@@ -5,7 +5,9 @@ from widgets_ui.conf_datos_ui import Ui_ConfDatos
 
 class AppConfDatos(QWidget):
 
-    def __init__(self,):
+    request_set_envio = pyqtSignal(tuple)
+
+    def __init__(self):
         super().__init__()
         self.ui = Ui_ConfDatos()
         self.ui.setupUi(self)
@@ -23,13 +25,6 @@ class AppConfDatos(QWidget):
             self.ui.comboBox_frec_muestreo.addItem(str(f))
         self.ui.comboBox_frec_muestreo.setCurrentText("1")
 
-        # settear opciones umbral
-        self.ui.horizontalSlider_umbral.setMaximum(350)
-        self.ui.horizontalSlider_umbral.setMinimum(200)
-        
-        # conectar slider con label
-        self.ui.horizontalSlider_umbral.valueChanged.connect(self.slide)
-
         # agregar opciones ventana
         self.ventanas = [5, 10, 30, 60]
         for v in self.ventanas:
@@ -37,28 +32,24 @@ class AppConfDatos(QWidget):
         self.ui.comboBox_media.setCurrentText("10")
 
         # forzar eleccion de al menos una variable
-        self.ui.checkBox_temp.stateChanged.connect(lambda: self.check_var(0))
-        self.ui.checkBox_hum.stateChanged.connect(lambda: self.check_var(1))
-        self.ui.checkBox_presion.stateChanged.connect(lambda: self.check_var(2))
+        self.ui.checkBox_temp.toggled.connect(lambda: self.check_var(0))
+        self.ui.checkBox_hum.toggled.connect(lambda: self.check_var(1))
+        self.ui.checkBox_presion.toggled.connect(lambda: self.check_var(2))
 
-
-    def slide(self, value: int):
-
-        umb = value / 10
-        self.ui.label_umbral_picos.setText(f"Umbral (°C):     {str(umb)}")
 
     def check_var(self, v: int):
 
         boxes = [self.ui.checkBox_temp, self.ui.checkBox_hum, self.ui.checkBox_presion]
 
-        c = False
-        for b in boxes:
-            if b.isChecked():
-                c = True
-                break
+        c = any(b.isChecked() for b in boxes)
 
-        if not c:
-            boxes[v].setChecked(True)
+        new_val = boxes[v].isChecked()
+        boxes[v].blockSignals(True)
+        boxes[v].setChecked(not new_val)
+        boxes[v].blockSignals(False)
+
+        if c:
+            self.request_set_envio.emit((v, new_val))
         
 
 if __name__ == "__main__":

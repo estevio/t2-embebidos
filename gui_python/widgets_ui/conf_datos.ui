@@ -166,20 +166,26 @@
             </sizepolicy>
            </property>
            <property name="text">
-            <string>Umbral (°C):     28.0</string>
+            <string>Umbral (°C):</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="QSlider" name="horizontalSlider_umbral">
-           <property name="sizePolicy">
-            <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-             <horstretch>0</horstretch>
-             <verstretch>0</verstretch>
-            </sizepolicy>
+          <widget class="QDoubleSpinBox" name="doubleSpinBox_umbral">
+           <property name="decimals">
+            <number>1</number>
            </property>
-           <property name="orientation">
-            <enum>Qt::Orientation::Horizontal</enum>
+           <property name="minimum">
+            <double>20.000000000000000</double>
+           </property>
+           <property name="maximum">
+            <double>40.000000000000000</double>
+           </property>
+           <property name="singleStep">
+            <double>0.100000000000000</double>
+           </property>
+           <property name="value">
+            <double>28.000000000000000</double>
            </property>
           </widget>
          </item>

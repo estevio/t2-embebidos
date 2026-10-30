@@ -1,11 +1,12 @@
 import time
 import collections
 import random as rnd
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QWidget, QTableWidgetItem, QAbstractItemView, QHeaderView
 from PyQt6.QtCore import QObject, pyqtSlot, pyqtSignal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from widgets_ui.graph_ui import Ui_Grafico
+from widgets_ui.graph_temp_ui import Ui_Grafico_Temp
 
 class Grafico(FigureCanvasQTAgg):
     """
@@ -61,8 +62,31 @@ class AppGrafico(QWidget):
         self.ui.title.setText(titulo)
         self.ui.graph_layout.addWidget(self.graf)
 
+class AppGraficoTemp(QWidget):
+    def __init__(self, titulo = "Temperatura"):
+        QWidget.__init__(self)
+        self.ui = Ui_Grafico_Temp()
+        self.ui.setupUi(self)
+        self.graf = Grafico()
+        self.ui.title.setText(titulo)
+        self.ui.graph_layout.addWidget(self.graf)
+
+        # tabla de picos
+        self.ui.tableWidget_picos.setColumnCount(2)
+        self.ui.tableWidget_picos.setHorizontalHeaderItem(0, QTableWidgetItem("Tiempo"))
+        self.ui.tableWidget_picos.setHorizontalHeaderItem(1, QTableWidgetItem("°C"))
+        self.ui.tableWidget_picos.horizontalHeader().setStretchLastSection(True)
+        self.ui.tableWidget_picos.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.ui.tableWidget_picos.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+
+    def addPico(self, tiempo: str, temp: str):
+        r = self.ui.tableWidget_picos.rowCount()
+        self.ui.tableWidget_picos.insertRow(r)
+        self.ui.tableWidget_picos.setItem(r, 0, QTableWidgetItem(tiempo))
+        self.ui.tableWidget_picos.setItem(r, 1, QTableWidgetItem(temp))
+
 if __name__ == "__main__":
     app = QApplication([])
-    app_graf = AppGrafico("Un gráfico cualquiera")
+    app_graf = AppGraficoTemp()
     app_graf.show()
     app.exec()
