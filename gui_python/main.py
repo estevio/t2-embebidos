@@ -34,8 +34,9 @@ if __name__ == "__main__":
     gui.data_config.ui.comboBox_frec_muestreo.currentTextChanged.connect(receiver.request_set_frecuencia_muestreo)
     receiver.frec_changed.connect(gui.data_config.set_frecuencia)
     # conectar con habilitar
-    gui.data_config.ui.checkBox_habilitar_media.toggled.connect(lambda: receiver.request_set_habilitar(0))
-    gui.data_config.ui.checkBox_habilitar_picos.toggled.connect(lambda: receiver.request_set_habilitar(1))
+    gui.data_config.request_habilitar.connect(receiver.request_set_habilitar)
+    receiver.toggle_habilitar.connect(gui.data_config.set_habilitar)
+    receiver.toggle_habilitar.connect(gui.plot_temp.set_habilitar)
     # conectar con umbral
     gui.data_config.request_umbral.connect(receiver.request_set_umbral)
     receiver.umbral_changed.connect(gui.data_config.set_umbral)

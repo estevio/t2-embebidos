@@ -9,6 +9,7 @@ class AppConfDatos(QWidget):
     request_umbral = pyqtSignal(float)
     request_frecuencia = pyqtSignal(str)
     envio_changed = pyqtSignal(int, bool)
+    request_habilitar = pyqtSignal(int, bool)
 
     def __init__(self):
         super().__init__()
@@ -45,6 +46,9 @@ class AppConfDatos(QWidget):
         self.ui.doubleSpinBox_umbral.valueChanged.connect(self.request_set_umbral)
         self.ui.comboBox_frec_muestreo.currentTextChanged.connect(self.request_set_frecuencia)
 
+        self.ui.checkBox_habilitar_media.toggled.connect(lambda: self.request_set_habilitar(0))
+        self.ui.checkBox_habilitar_picos.toggled.connect(lambda: self.request_set_habilitar(1))
+
     def check_var(self, v: int):
 
         boxes = [self.ui.checkBox_temp, self.ui.checkBox_hum, self.ui.checkBox_presion]
@@ -74,18 +78,29 @@ class AppConfDatos(QWidget):
         boxes[var].setChecked(val)
         boxes[var].blockSignals(False)
 
-        """
-        if val:
-            if var == 0 and self.gui.plot_temp.isHidden():
-                self.gui.plot_temp.show()
-            graphs[var].show()
-        else:
-            graphs[var].hide()
-            cond = self.gui.data_config.ui.checkBox_habilitar_picos.isChecked() or self.gui.data_config.ui.checkBox_habilitar_media.isChecked()
-            if not cond:
-                self.gui.plot_temp.hide()
-        """
+    def request_set_habilitar(self, var: int):
+        
+        boxes = [self.ui.checkBox_habilitar_media,
+                 self.ui.checkBox_habilitar_picos]
 
+        new_val = boxes[var].isChecked()
+        boxes[var].blockSignals(True)
+        boxes[var].setChecked(not new_val)
+        boxes[var].blockSignals(False)
+
+        self.request_habilitar.emit(var, new_val)
+
+    @pyqtSlot(int, bool)
+    def set_habilitar(self, var: int, val: bool):
+
+        boxes = [self.ui.checkBox_habilitar_media,
+                 self.ui.checkBox_habilitar_picos]
+
+        boxes[var].blockSignals(True)
+        boxes[var].setChecked(val)
+        boxes[var].blockSignals(False)
+
+        
     def request_set_umbral(self, v: float):
         #print("request a set_umbral desde data_config")
 

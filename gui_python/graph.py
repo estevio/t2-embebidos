@@ -119,6 +119,22 @@ class AppGraficoTemp(QWidget):
                 fig.hide()
             if self.ui.GraphSpace.isHidden() and vars[1-var].isHidden():
                 self.hide()
+
+    @pyqtSlot(int, bool)
+    def set_habilitar(self, var: int, c: bool):
+        items = [(self.ui.label_seccion_media, self.ui.label_media_2),
+                 (self.ui.label_seccion_picos, self.ui.tableWidget_picos)]
+
+        if c:
+            self.show()
+            for it in items[var]:
+                it.show()
+        else:
+            for it in items[var]:
+                it.hide()
+            if items[1-var][0].isHidden() and self.ui.GraphSpace.isHidden():
+                self.hide()
+
 if __name__ == "__main__":
     app = QApplication([])
     app_graf = AppGraficoTemp()

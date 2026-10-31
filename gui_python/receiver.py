@@ -16,12 +16,10 @@ class DataReceiver(QObject):
     umbral_changed = pyqtSignal(float)
     frec_changed = pyqtSignal(str)
     toggle_envio = pyqtSignal(int, bool)
+    toggle_habilitar = pyqtSignal(int, bool)
 
     def __init__(self, gui: GUI):
         super().__init__()
-        # TODO: quitar gui
-        self.gui = gui
-
         self.command_queue = Queue()
 
         self.ser = None
@@ -73,59 +71,13 @@ class DataReceiver(QObject):
         # enviar señal a conf_datos y graf
         self.toggle_envio.emit(var, val)
 
-        """
-        if val:
-            if var == 0 and self.gui.plot_temp.isHidden():
-                self.gui.plot_temp.show()
-            graphs[var].show()
-        else:
-            graphs[var].hide()
-            cond = self.gui.data_config.ui.checkBox_habilitar_picos.isChecked() or self.gui.data_config.ui.checkBox_habilitar_media.isChecked()
-            if not cond:
-                self.gui.plot_temp.hide()
-        """
+    def request_set_habilitar(self, var: int, val: bool):
 
-    def request_set_habilitar(self, var: int):
-
-        boxes = [self.gui.data_config.ui.checkBox_habilitar_media,
-                self.gui.data_config.ui.checkBox_habilitar_picos]
-
-        new_val = boxes[var].isChecked()
-        boxes[var].blockSignals(True)
-        boxes[var].setChecked(not new_val)
-        boxes[var].blockSignals(False)
-
-        self.set_habilitar(var, new_val)
+        self.set_habilitar(var, val)
 
     def set_habilitar(self, var: int, b: bool):
 
-        boxes = [self.gui.data_config.ui.checkBox_habilitar_media,
-                self.gui.data_config.ui.checkBox_habilitar_picos]
-
-        items = [(self.gui.plot_temp.ui.label_seccion_media, self.gui.plot_temp.ui.label_media_2),
-                 (self.gui.plot_temp.ui.label_seccion_picos, self.gui.plot_temp.ui.tableWidget_picos)]
-
-        boxes[var].blockSignals(True)
-        boxes[var].setChecked(b)
-        boxes[var].blockSignals(False)
-
-        print(f"cambiando {var} a {b}")
-
-        if b:
-            
-            if self.gui.plot_temp.isHidden():
-                self.gui.plot_temp.show()
-            
-            for it in items[var]:
-                it.show()
-
-        else:
-            for it in items[var]:
-                it.hide()
-
-            # todo está escondido
-            if not boxes[1-var].isChecked() and not self.gui.data_config.ui.checkBox_temp.isChecked():
-                self.gui.plot_temp.hide()
+        self.toggle_habilitar.emit(var, b)
 
     @pyqtSlot(str)
     def request_set_frecuencia_muestreo(self, v: str):
