@@ -44,7 +44,7 @@ class DataReceiver(QObject):
         pass
 
     # envía la solicitud a la esp
-    @pyqtSlot(tuple)
+    @pyqtSlot(int, bool)
     def request_set_envio(self, var: int, val: bool):
         """
         info (tuple): var, bool
