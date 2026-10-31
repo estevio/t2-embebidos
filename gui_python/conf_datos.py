@@ -59,6 +59,33 @@ class AppConfDatos(QWidget):
         if c:
             self.request_envio.emit(v, new_val)
 
+    @pyqtSlot(int, bool)
+    def set_envio(self, var: int, val:bool):
+        """
+        var = 0: temperatura
+        var = 1: humedad
+        var = 2: presion
+        """
+        boxes = [self.ui.checkBox_temp, 
+                self.ui.checkBox_hum, 
+                self.ui.checkBox_presion]
+        
+        boxes[var].blockSignals(True)
+        boxes[var].setChecked(val)
+        boxes[var].blockSignals(False)
+
+        """
+        if val:
+            if var == 0 and self.gui.plot_temp.isHidden():
+                self.gui.plot_temp.show()
+            graphs[var].show()
+        else:
+            graphs[var].hide()
+            cond = self.gui.data_config.ui.checkBox_habilitar_picos.isChecked() or self.gui.data_config.ui.checkBox_habilitar_media.isChecked()
+            if not cond:
+                self.gui.plot_temp.hide()
+        """
+
     def request_set_umbral(self, v: float):
         #print("request a set_umbral desde data_config")
 

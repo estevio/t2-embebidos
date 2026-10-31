@@ -1,5 +1,6 @@
 import time
 import random as rnd
+from queue import Queue
 from PyQt6.QtCore import QObject, pyqtSlot, pyqtSignal
 from gui import GUI
 
@@ -14,11 +15,14 @@ class DataReceiver(QObject):
     toggle_conectar = pyqtSignal()
     umbral_changed = pyqtSignal(float)
     frec_changed = pyqtSignal(str)
+    toggle_envio = pyqtSignal(int, bool)
 
     def __init__(self, gui: GUI):
         super().__init__()
         # TODO: quitar gui
         self.gui = gui
+
+        self.command_queue = Queue()
 
         self.ser = None
         self.conectado = False
@@ -40,7 +44,7 @@ class DataReceiver(QObject):
     def send_uart(self):
         pass
 
-    def recv_uart(self):
+    def decode_uart(self):
         pass
 
     # envía la solicitud a la esp
@@ -66,19 +70,10 @@ class DataReceiver(QObject):
         var = 1: humedad
         var = 2: presion
         """
-        boxes = [self.gui.data_config.ui.checkBox_temp, 
-                 self.gui.data_config.ui.checkBox_hum, 
-                 self.gui.data_config.ui.checkBox_presion]
+        # enviar señal a conf_datos y graf
+        self.toggle_envio.emit(var, val)
 
-        graphs = [self.gui.plot_temp.ui.GraphSpace, 
-                  self.gui.plot_hum,
-                  self.gui.plot_pres,
-                  self.gui.plot_temp.ui.label_seccion_media]
-        
-        boxes[var].blockSignals(True)
-        boxes[var].setChecked(val)
-        boxes[var].blockSignals(False)
-
+        """
         if val:
             if var == 0 and self.gui.plot_temp.isHidden():
                 self.gui.plot_temp.show()
@@ -88,6 +83,7 @@ class DataReceiver(QObject):
             cond = self.gui.data_config.ui.checkBox_habilitar_picos.isChecked() or self.gui.data_config.ui.checkBox_habilitar_media.isChecked()
             if not cond:
                 self.gui.plot_temp.hide()
+        """
 
     def request_set_habilitar(self, var: int):
 

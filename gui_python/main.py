@@ -27,6 +27,9 @@ if __name__ == "__main__":
     # conexiones con conf_datos
     # conectar recepción checkboxes 
     gui.data_config.request_envio.connect(receiver.request_set_envio)
+    grafs = [gui.plot_temp, gui.plot_hum, gui.plot_pres]
+    receiver.toggle_envio.connect(lambda var, val: grafs[var].toggle_visibility(val)) #TODO: encontrar solucion para que esto sea seguro (hint: herencia?)
+    receiver.toggle_envio.connect(gui.data_config.set_envio)
     # conectar recepción cambios en frecuencia de muestreo
     gui.data_config.ui.comboBox_frec_muestreo.currentTextChanged.connect(receiver.request_set_frecuencia_muestreo)
     receiver.frec_changed.connect(gui.data_config.set_frecuencia)

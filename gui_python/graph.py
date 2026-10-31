@@ -62,6 +62,13 @@ class AppGrafico(QWidget):
         self.ui.title.setText(titulo)
         self.ui.graph_layout.addWidget(self.graf)
 
+    @pyqtSlot(bool)
+    def toggle_visibility(self, b: bool):
+        if b:
+            self.show()
+        else:
+            self.hide()
+
 class AppGraficoTemp(QWidget):
     def __init__(self, titulo = "Temperatura"):
         QWidget.__init__(self)
@@ -89,6 +96,29 @@ class AppGraficoTemp(QWidget):
         # TODO: validar avg
         self.ui.label_media_2.setText(f"Ultima media reportada: {str(v)}")
 
+    @pyqtSlot(bool)
+    def toggle_visibility(self, b: bool):
+        if b:
+            self.show()
+            self.ui.GraphSpace.show()
+        else:
+            self.ui.GraphSpace.hide()
+            if self.ui.label_seccion_media.isHidden() and self.ui.label_seccion_picos.isHidden():
+                self.hide()
+
+    def toggle_visibility_temp(self, var: int, b: bool):
+        vars = [(self.ui.label_seccion_media, self.ui.label_media_2),
+                (self.ui.label_seccion_picos, self.ui.tableWidget_picos)]
+
+        if b:
+            self.show()
+            for fig in vars[var]:
+                fig.show()
+        else:
+            for fig in vars[var]:
+                fig.hide()
+            if self.ui.GraphSpace.isHidden() and vars[1-var].isHidden():
+                self.hide()
 if __name__ == "__main__":
     app = QApplication([])
     app_graf = AppGraficoTemp()
