@@ -218,3 +218,32 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Directorios de Compilación y Generados por CMake ---
+/build/
+/managed_components/
+/[Bb]uild*/
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+
+# --- Configuración del proyecto y del sistema (SDKConfig) ---
+# El archivo sdkconfig guarda tus elecciones locales del menú de configuración (Kconfig).
+# Opcionalmente puedes ignorarlo si prefieres que cada desarrollador genere el suyo, 
+# o versionar solo 'sdkconfig.defaults'.
+/sdkconfig
+
+.vscode/
+
+# --- Archivos del Sistema Operativo ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Varios y Respaldos ---
+*.log
+*.elf
+*.bin
+*.map
+sasc_*.json
+
