@@ -8,17 +8,17 @@ class DataReceiver(QObject):
     data_recvd_temp = pyqtSignal(float)
     data_recvd_hum = pyqtSignal(float)
     data_recvd_pres = pyqtSignal(float)
+    data_recvd_avg = pyqtSignal(float)
+    data_recvd_peak = pyqtSignal(float)
+
+    toggle_conectar = pyqtSignal()
+    umbral_changed = pyqtSignal(float)
+    frec_changed = pyqtSignal(str)
 
     def __init__(self, gui: GUI):
         super().__init__()
+        # TODO: quitar gui
         self.gui = gui
-        self.last_frec_index = gui.data_config.ui.comboBox_frec_muestreo.currentIndex()
-        self.last_umbral = gui.data_config.ui.doubleSpinBox_umbral.value()
-
-        self.gui.data_config.ui.checkBox_habilitar_media.toggled.connect(lambda: self.request_set_habilitar(0))
-        self.gui.data_config.ui.checkBox_habilitar_picos.toggled.connect(lambda: self.request_set_habilitar(1))
-
-        self.gui.data_config.ui.doubleSpinBox_umbral.valueChanged.connect(self.request_set_umbral)
 
         self.ser = None
         self.conectado = False
@@ -45,7 +45,7 @@ class DataReceiver(QObject):
 
     # envía la solicitud a la esp
     @pyqtSlot(tuple)
-    def request_set_envio(self, info: tuple):
+    def request_set_envio(self, var: int, val: bool):
         """
         info (tuple): var, bool
         var = 0: temperatura;
@@ -57,16 +57,14 @@ class DataReceiver(QObject):
         self.send_uart()
 
         # mientras no haya conexion real
-        self.set_envio(info[1], info[0])
+        self.set_envio(var, val)
 
     # recibe la confirmacion de la esp
-    def set_envio(self, b: bool, var: int):
+    def set_envio(self, var: int, val: bool):
         """
         var = 0: temperatura
         var = 1: humedad
         var = 2: presion
-        var = 3: media
-        var = 4: picos
         """
         boxes = [self.gui.data_config.ui.checkBox_temp, 
                  self.gui.data_config.ui.checkBox_hum, 
@@ -78,10 +76,10 @@ class DataReceiver(QObject):
                   self.gui.plot_temp.ui.label_seccion_media]
         
         boxes[var].blockSignals(True)
-        boxes[var].setChecked(b)
+        boxes[var].setChecked(val)
         boxes[var].blockSignals(False)
 
-        if b:
+        if val:
             if var == 0 and self.gui.plot_temp.isHidden():
                 self.gui.plot_temp.show()
             graphs[var].show()
@@ -133,36 +131,25 @@ class DataReceiver(QObject):
             if not boxes[1-var].isChecked() and not self.gui.data_config.ui.checkBox_temp.isChecked():
                 self.gui.plot_temp.hide()
 
+    @pyqtSlot(str)
     def request_set_frecuencia_muestreo(self, v: str):
-
-        print(f"solcitando {v}")
-        self.gui.data_config.ui.comboBox_frec_muestreo.blockSignals(True)
-        self.gui.data_config.ui.comboBox_frec_muestreo.setCurrentIndex(self.last_frec_index)
-        self.gui.data_config.ui.comboBox_frec_muestreo.blockSignals(False)
+        #print("request a set_frecuencia desde receiver")
         self.send_uart()
         self.set_frecuencia_muestreo(v)
 
     def set_frecuencia_muestreo(self, v: str):
+        #print("llamando a set_frecuencia desde receiver")
+        self.frec_changed.emit(v)
 
-        i = self.gui.data_config.ui.comboBox_frec_muestreo.findText(v)
-        self.gui.data_config.ui.comboBox_frec_muestreo.blockSignals(True)
-        self.gui.data_config.ui.comboBox_frec_muestreo.setCurrentIndex(i)
-        self.gui.data_config.ui.comboBox_frec_muestreo.blockSignals(False)
-        self.last_frec_index = i
-
+    @pyqtSlot(float)
     def request_set_umbral(self, v: float):
-
-        self.gui.data_config.ui.doubleSpinBox_umbral.blockSignals(True)
-        self.gui.data_config.ui.doubleSpinBox_umbral.setValue(self.last_umbral)
-        self.gui.data_config.ui.doubleSpinBox_umbral.blockSignals(False)
+        #print("request a set_umbral desde receiver")
         self.set_umbral(v)
 
     def set_umbral(self, v: float):
+        #print("llamando a set_umbral desde reciever")
+        self.umbral_changed.emit(v)
 
-        self.gui.data_config.ui.doubleSpinBox_umbral.blockSignals(True)
-        self.gui.data_config.ui.doubleSpinBox_umbral.setValue(v)
-        self.gui.data_config.ui.doubleSpinBox_umbral.blockSignals(False)
-        self.last_umbral = v
-
+    @pyqtSlot()
     def conectar(self):
-        pass
+        self.toggle_conectar.emit()

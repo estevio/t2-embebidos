@@ -7,6 +7,8 @@ from widgets_ui.conexion_ui import Ui_ConfigConexion
 
 class AppConexion(QWidget):
 
+    conectar_toggled = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.ui = Ui_ConfigConexion()
@@ -27,12 +29,25 @@ class AppConexion(QWidget):
             self.ui.comboBox_baud_rate.addItem(str(b))
         self.ui.comboBox_baud_rate.setCurrentText("115200")
 
+        # conectar gui - receiver
+        self.ui.pushButton_conectar.pressed.connect(self.request_conectar)
+
+    def request_conectar(self):
+        print("enviando señal")
+        self.conectar_toggled.emit()
+
+    @pyqtSlot()
     def toggle_conectar(self):
-        
-        if self.ui.pushButton_conectar.text == "Conectar":
+        print("toggle conectar en conexion")
+        if self.ui.pushButton_conectar.text() == "Conectar":
             self.ui.pushButton_conectar.setText("Desconectar")
+            # bloquar cambio de baud rate + puerto (?)
+            self.ui.comboBox_puerto.setDisabled(True)
+            self.ui.comboBox_baud_rate.setDisabled(True)
         else:
             self.ui.pushButton_conectar.setText("Conectar")
+            self.ui.comboBox_puerto.setDisabled(False)
+            self.ui.comboBox_baud_rate.setDisabled(False)
 
 if __name__ == "__main__":
     app = QApplication([])

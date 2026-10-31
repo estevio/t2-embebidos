@@ -5,7 +5,10 @@ from widgets_ui.conf_datos_ui import Ui_ConfDatos
 
 class AppConfDatos(QWidget):
 
-    request_set_envio = pyqtSignal(tuple)
+    request_envio = pyqtSignal(int, bool)
+    request_umbral = pyqtSignal(float)
+    request_frecuencia = pyqtSignal(str)
+    envio_changed = pyqtSignal(int, bool)
 
     def __init__(self):
         super().__init__()
@@ -36,6 +39,11 @@ class AppConfDatos(QWidget):
         self.ui.checkBox_hum.toggled.connect(lambda: self.check_var(1))
         self.ui.checkBox_presion.toggled.connect(lambda: self.check_var(2))
 
+        self.last_frec_index = self.ui.comboBox_frec_muestreo.currentIndex()
+        self.last_umbral = self.ui.doubleSpinBox_umbral.value()
+
+        self.ui.doubleSpinBox_umbral.valueChanged.connect(self.request_set_umbral)
+        self.ui.comboBox_frec_muestreo.currentTextChanged.connect(self.request_set_frecuencia)
 
     def check_var(self, v: int):
 
@@ -49,8 +57,39 @@ class AppConfDatos(QWidget):
         boxes[v].blockSignals(False)
 
         if c:
-            self.request_set_envio.emit((v, new_val))
-        
+            self.request_envio.emit(v, new_val)
+
+    def request_set_umbral(self, v: float):
+        #print("request a set_umbral desde data_config")
+
+        self.ui.doubleSpinBox_umbral.blockSignals(True)
+        self.ui.doubleSpinBox_umbral.setValue(self.last_umbral)
+        self.ui.doubleSpinBox_umbral.blockSignals(False)
+        self.request_umbral.emit(v)
+
+    @pyqtSlot(float)
+    def set_umbral(self, v: float):
+        #print("llamando a set_umbral desde data_config")
+        self.ui.doubleSpinBox_umbral.blockSignals(True)
+        self.ui.doubleSpinBox_umbral.setValue(v)
+        self.ui.doubleSpinBox_umbral.blockSignals(False)
+        self.last_umbral = v
+
+    def request_set_frecuencia(self, v: str):
+        #print("request a set_frecuencia desde data_config")
+        self.ui.comboBox_frec_muestreo.blockSignals(True)
+        self.ui.comboBox_frec_muestreo.setCurrentIndex(self.last_frec_index)
+        self.ui.comboBox_frec_muestreo.blockSignals(False)
+        self.request_frecuencia.emit(v)
+
+    @pyqtSlot(str)
+    def set_frecuencia(self, v: str):
+        #print("llamando a set_frecuencia desde data_config")
+        i = self.ui.comboBox_frec_muestreo.findText(v)
+        self.ui.comboBox_frec_muestreo.blockSignals(True)
+        self.ui.comboBox_frec_muestreo.setCurrentIndex(i)
+        self.ui.comboBox_frec_muestreo.blockSignals(False)
+        self.last_frec_index = i
 
 if __name__ == "__main__":
     app = QApplication([])

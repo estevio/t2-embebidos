@@ -85,6 +85,10 @@ class AppGraficoTemp(QWidget):
         self.ui.tableWidget_picos.setItem(r, 0, QTableWidgetItem(tiempo))
         self.ui.tableWidget_picos.setItem(r, 1, QTableWidgetItem(temp))
 
+    def change_avg(self, v: float):
+        # TODO: validar avg
+        self.ui.label_media_2.setText(f"Ultima media reportada: {str(v)}")
+
 if __name__ == "__main__":
     app = QApplication([])
     app_graf = AppGraficoTemp()
