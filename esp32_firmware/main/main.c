@@ -43,6 +43,8 @@
 #define BME688_STATUS_NEW_DATA      (1 << 7)
 #define BME688_STATUS_MEASURING     (1 << 5)
 
+#define TICKS_PER_SECOND            1000
+
 
 /*
 // Estructura que representa un mensaje de configuracion
@@ -104,8 +106,9 @@ ConfigMsg config_from_json(char *json) {
 }
 */
 
-/*  ESTRUCTURAS   */
+/*  --------------------------------  ESTRUCTURAS  ---------------------------------   */
 
+/* Estructura que contiene los datos obtenidos de la calibracion del sensor */
 typedef struct {
 
     uint16_t par_t1;
@@ -133,18 +136,34 @@ typedef struct {
 
 } Calib;
 
+/* Estructura que contiene los datos a conservar luego de la inicializacion del sensor */
 typedef struct {
     bool success;
     i2c_master_bus_handle_t bus_handle;
     i2c_master_dev_handle_t dev_handle;
 } ConfigSensor;
 
+/* Estructura que representa un pico de temperatura */
+typedef struct {
+    bool valid;
+    double pico;
+    TickType_t ticks;
+} Pico;
+
+/* Estructura que contiene mediciones de:
+    - temperatura
+    - humedad relativa
+    - presion
+    - promedio de temperaturas
+    - pico de temperatura detectado
+*/
 typedef struct {
     double temp;
     double hum;
     double pres;
     double avg;
-    double peak;
+    Pico pico;
+    TickType_t tiempo;
 } Medicion;
 
 // Estructura que representa la configuracion actual
@@ -157,43 +176,97 @@ typedef struct {
     bool h_pres;
     bool h_avg;
     bool h_pico;
+    SemaphoreHandle_t m;
 } Config;
 
+/* Estructura que representa una cola de temperaturas con ticks asociados */
 typedef struct {
     double temps[150];
     TickType_t ticks[150];
-    int window;
     int head;
     int tail;
-    TickType_t fst_ticks;
-    TickType_t last_ticks;
     double t_sum;
+    bool in_peak;
     SemaphoreHandle_t m;
 } TQueue;
 
-void t_queue_init(TQueue *q, int window_s) {
-    q->head = 0;
-    q->tail = 0;
-    q->window = window_s;
-    q->t_sum = 0;
-    q->m = xSemaphoreCreateMutex();
-}
-
-void t_enqueue(TQueue *q, double temp, TickType_t tick) {
-    if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        int pos = q->tail;
-        q->temps[pos] = temp;
-        q->ticks[pos] = tick;
-        q->tail = (q->tail++ % 100);
-        q->fst_ticks = q->ticks[q->head];
-        q->last_ticks = tick;
-    }
-}
-
-/* VARIABLES GLOBALES */
+/* --------------------------------------- VARIABLES GLOBALES ------------------------------------------------ */
 SemaphoreHandle_t mutex = NULL;
 ConfigSensor *s_conf = NULL;
 Calib *cal = NULL;
+TQueue *tq = NULL;
+Config *gui_conf = NULL;
+
+/* --------------------------------------- FUNCIONES PARA TQUEUE --------------------------------------------- */
+
+/* inicializador de una cola de temperaturas */
+void t_queue_init(TQueue *q) {
+    q->head = 0;
+    q->tail = 0;
+    q->t_sum = 0;
+    q->in_peak = false;
+    q->m = xSemaphoreCreateMutex();
+}
+
+/* encola temperaturas, despues se debera llamar a _dequeue */
+void t_enqueue(TQueue *q, double temp, TickType_t tick) {
+    if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
+        int pos = (q->tail + 1) % 150;
+        q->temps[pos] = temp;
+        q->ticks[pos] = tick;
+        q->tail = pos;
+        q->t_sum += temp;
+        xSemaphoreGive(q->m);
+    }
+}
+
+/* saca de la cola toda temperatura que haya sido medida antes de ticks */
+// ticks debe ser el tiempo de la ultima medicion menos los ticks correspondientes a la ventana actual
+void t_dequeue(TQueue *q, TickType_t ticks) {
+    if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
+        int fst = q->head;
+        while (q->ticks[fst] < ticks) {
+            q->t_sum -= q->temps[fst];
+            fst++;
+        }
+        q->head = fst;
+        xSemaphoreGive(q->m);
+    }
+}
+
+/* calcula el promedio de las mediciones dentro de la cola */
+double t_queue_avg(TQueue *q) {
+    double res;
+    if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
+        int size = abs(q->tail - q->head);
+        res = q->t_sum / size;
+        xSemaphoreGive(q->m);
+    }
+    return res;
+}
+
+/* busca picos de temperatura y retorna una estructura pico */
+Pico t_queue_peak(TQueue *q, double umbral) {
+    Pico res;
+    res.valid = false;
+    if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
+        int pos = q->tail;
+        double t1 = q->temps[pos - 2];
+        double t2 = q->temps[pos - 1];
+        double t3 = q->temps[pos];
+        if (q->in_peak) {
+            if (t3 < t2) q->in_peak = false;
+        }
+        else if (t3 >= umbral && t2 > t1 && t2>= 3) {
+            q->in_peak = true;
+            res.valid = true;
+            res.pico = t2;
+            res.ticks = q->ticks[pos - 1];
+        }
+        xSemaphoreGive(q->m);
+        return res;
+    }
+}
 
 void init_sensor(void) {
 
@@ -335,8 +408,63 @@ void deinit_sensor(void) {
     ESP_LOGI(TAG, "I2C de-inicializado\n");
 }
 
-void calc_avg(void) {
+Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, TickType_t ticks) {
 
+    /* Temperature [degC] */
+    double var1 = ((double)temp_adc / 16384.0 - (double)cal->par_t1 / 1024.0) * (double)cal->par_t2;
+    double d    = (double)temp_adc / 131072.0 - (double)cal->par_t1 / 8192.0;
+    double var2 = d * d * ((double)cal->par_t3 * 16.0);
+    double t_fine    = var1 + var2;
+    double temp_comp = t_fine / 5120.0;
+
+    /* Pressure [Pa] */
+    var1 = (t_fine / 2.0) - 64000.0;
+    var2 = var1 * var1 * ((double)cal->par_p6 / 131072.0);
+    var2 = var2 + (var1 * (double)cal->par_p5 * 2.0);
+    var2 = (var2 / 4.0) + ((double)cal->par_p4 * 65536.0);
+    var1 = ((((double)cal->par_p3 * var1 * var1) / 16384.0) + ((double)cal->par_p2 * var1)) / 524288.0;
+    var1 = (1.0 + (var1 / 32768.0)) * (double)cal->par_p1;
+    double press_comp = 1048576.0 - (double)press_adc;
+    if (var1 != 0.0) {
+        press_comp = ((press_comp - (var2 / 4096.0)) * 6250.0) / var1;
+        var1 = ((double)cal->par_p9 * press_comp * press_comp) / 2147483648.0;
+        var2 = press_comp * ((double)cal->par_p8 / 32768.0);
+        double var3 = (press_comp / 256.0) * (press_comp / 256.0) * (press_comp / 256.0)
+                    * ((double)cal->par_p10 / 131072.0);
+        press_comp = press_comp + (var1 + var2 + var3 + ((double)cal->par_p7 * 128.0)) / 16.0;
+    } else {
+        press_comp = 0.0;
+    }
+
+    /* Humidity [%RH] */
+    var1 = (double)hum_adc - (((double)cal->par_h1 * 16.0) + (((double)cal->par_h3 / 2.0) * temp_comp));
+    var2 = var1 * (((double)cal->par_h2 / 262144.0)
+                    * (1.0 + (((double)cal->par_h4 / 16384.0) * temp_comp)
+                            + (((double)cal->par_h5 / 1048576.0) * temp_comp * temp_comp)));
+    double var3 = (double)cal->par_h6 / 16384.0;
+    double var4 = (double)cal->par_h7 / 2097152.0;
+    double hum_comp = var2 + ((var3 + (var4 * temp_comp)) * var2 * var2);
+    if (hum_comp > 100.0)
+        hum_comp = 100.0;
+    else if (hum_comp < 0.0)
+        hum_comp = 0.0;
+
+    Medicion res;
+    if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
+        if (gui_conf->h_temp || gui_conf->h_avg || gui_conf->h_pico) {
+            t_enqueue(tq, temp_comp, ticks);
+            t_dequeue(tq, ticks - gui_conf->ventana * TICKS_PER_SECOND);
+            if (gui_conf->h_temp) 
+                res.temp = temp_comp;
+            if (gui_conf->h_avg) 
+                res.avg = t_queue_avg(tq);
+            if (gui_conf->h_pico) {
+                res.pico = t_queue_peak(tq, gui_conf->umbral); // TODO: sera necesario hacer que pico sea un puntero a una estructura alocada con malloc?
+            }
+        }
+
+    }
+    return res;
 }
 
 void read_data(void) {
@@ -381,47 +509,10 @@ void read_data(void) {
             uint32_t temp_adc  = ((uint32_t)data[5] << 12) | ((uint32_t)data[6] << 4) | (data[7] >> 4);
             uint16_t hum_adc   = (uint16_t)((data[8] << 8) | data[9]);
 
-            /* Temperature [degC] */
-            double var1 = ((double)temp_adc / 16384.0 - (double)cal->par_t1 / 1024.0) * (double)cal->par_t2;
-            double d    = (double)temp_adc / 131072.0 - (double)cal->par_t1 / 8192.0;
-            double var2 = d * d * ((double)cal->par_t3 * 16.0);
-            double t_fine    = var1 + var2;
-            double temp_comp = t_fine / 5120.0;
-
-            /* Pressure [Pa] */
-            var1 = (t_fine / 2.0) - 64000.0;
-            var2 = var1 * var1 * ((double)cal->par_p6 / 131072.0);
-            var2 = var2 + (var1 * (double)cal->par_p5 * 2.0);
-            var2 = (var2 / 4.0) + ((double)cal->par_p4 * 65536.0);
-            var1 = ((((double)cal->par_p3 * var1 * var1) / 16384.0) + ((double)cal->par_p2 * var1)) / 524288.0;
-            var1 = (1.0 + (var1 / 32768.0)) * (double)cal->par_p1;
-            double press_comp = 1048576.0 - (double)press_adc;
-            if (var1 != 0.0) {
-                press_comp = ((press_comp - (var2 / 4096.0)) * 6250.0) / var1;
-                var1 = ((double)cal->par_p9 * press_comp * press_comp) / 2147483648.0;
-                var2 = press_comp * ((double)cal->par_p8 / 32768.0);
-                double var3 = (press_comp / 256.0) * (press_comp / 256.0) * (press_comp / 256.0)
-                            * ((double)cal->par_p10 / 131072.0);
-                press_comp = press_comp + (var1 + var2 + var3 + ((double)cal->par_p7 * 128.0)) / 16.0;
-            } else {
-                press_comp = 0.0;
-            }
-
-            /* Humidity [%RH] */
-            var1 = (double)hum_adc - (((double)cal->par_h1 * 16.0) + (((double)cal->par_h3 / 2.0) * temp_comp));
-            var2 = var1 * (((double)cal->par_h2 / 262144.0)
-                            * (1.0 + (((double)cal->par_h4 / 16384.0) * temp_comp)
-                                    + (((double)cal->par_h5 / 1048576.0) * temp_comp * temp_comp)));
-            double var3 = (double)cal->par_h6 / 16384.0;
-            double var4 = (double)cal->par_h7 / 2097152.0;
-            double hum_comp = var2 + ((var3 + (var4 * temp_comp)) * var2 * var2);
-            if (hum_comp > 100.0)
-                hum_comp = 100.0;
-            else if (hum_comp < 0.0)
-                hum_comp = 0.0;
+            Medicion med = calc_medicion(temp_adc, press_adc, hum_adc, previous_time); // es previous time ??
 
             printf("TEMP:\t%.2f degC\tPRESS:\t%.2f hPa\tHUM:\t%.2f %%RH\n",
-                    temp_comp, press_comp / 100.0, hum_comp);
+                    med.temp, med.pres / 100.0, med.hum);
         }
 
         xTaskDelayUntil(&previous_time, pdMS_TO_TICKS(1000 / SAMPLE_RATE_HZ));
