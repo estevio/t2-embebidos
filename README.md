@@ -6,10 +6,16 @@
 
 Envío de configuraciones
 
-```
-{"tipo":"config", (config):(config-val)}
+``
+{"tipo":"config"
+  "config": "config-tipo"
+  "config-tipo":"config-val}
+``
 
-(config, config-val):
+```
+{"tipo":"config", (config-tipo):(config-val)}
+
+(config-tipo, config-val):
     ("frec_muestreo", (0.5, 1, 2 o 5))
     ("habilitar",("temp", "hum", "pres", "avg", "pico"))
     ("ventana_avg", (5, 10, 30 o 60))
@@ -35,6 +41,11 @@ Recepción de picos de temperatura
 
 Confirmación de configuraciones
 
+``
+{"tipo":"ack","status":"ok","config":"config-tipo"
+  "config-tipo":"config-val}
+``
+
 ```
 {"tipo":"ack","status":("ok" o "rech"),(config):(config-val)}
 
@@ -44,3 +55,9 @@ Confirmación de configuraciones
     ("ventana_avg", (5, 10, 30 o 60))
     ("umbral_pico", (float))
 ```
+
+``
+{"tipo":"config"
+  "config": "config-tipo"
+  "config-tipo":"config-val}
+``
