@@ -427,7 +427,7 @@ void read_data(void) {
         xTaskDelayUntil(&previous_time, pdMS_TO_TICKS(1000 / SAMPLE_RATE_HZ));
     }
     if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
-        deinit_sensor(s_conf->dev_handle, s_conf->bus_handle);
+        deinit_sensor();
         xSemaphoreGive(mutex);
     }
     
