@@ -236,7 +236,7 @@ void t_dequeue(TQueue *q, TickType_t ticks) {
 
 /* calcula el promedio de las mediciones dentro de la cola */
 double t_queue_avg(TQueue *q) {
-    double res;
+    double res = -1;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
         int size = abs(q->tail - q->head);
         res = q->t_sum / size;
@@ -264,8 +264,8 @@ Pico t_queue_peak(TQueue *q, double umbral) {
             res.ticks = q->ticks[pos - 1];
         }
         xSemaphoreGive(q->m);
-        return res;
     }
+    return res;
 }
 
 void init_sensor(void) {
@@ -462,12 +462,16 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
                 res.pico = t_queue_peak(tq, gui_conf->umbral); // TODO: sera necesario hacer que pico sea un puntero a una estructura alocada con malloc?
             }
         }
-
+        if (gui_conf->h_pres)
+            res.pres = press_comp;
+        if (gui_conf->h_hum)
+            res.hum = hum_comp;
+        xSemaphoreGive(gui_conf->m);
     }
     return res;
 }
 
-void read_data(void) {
+void read_data(void *a) {
 
     /* Read data */
     TickType_t previous_time = xTaskGetTickCount();
@@ -475,6 +479,9 @@ void read_data(void) {
     uint8_t buf[2];
 
     for (uint32_t i = 0; i < 3; i++) {
+
+        printf("read_data: iteracion %d\n", (int) i);
+
         buf[0] = BME688_CTRL_MEAS_ADDR;
         buf[1] = (0x1 << 5) | (0x1 << 2) | 0x1;
         if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
@@ -531,9 +538,17 @@ void app_main(void){
     mutex = xSemaphoreCreateMutex();
     s_conf = (ConfigSensor *) malloc(sizeof(ConfigSensor));
     cal = (Calib *) malloc(sizeof(Calib));
+    tq = (TQueue *) malloc(sizeof(TQueue));
+    t_queue_init(tq);
+    gui_conf = (Config *) malloc(sizeof(Config));
+    gui_conf->m = xSemaphoreCreateMutex();
+    gui_conf->frec = 0.5;
+    gui_conf->umbral = 28.0;
+    gui_conf->ventana = 5;
+    gui_conf->h_avg = gui_conf->h_pico = false;
+    gui_conf->h_temp = gui_conf->h_pres = gui_conf->h_hum = true;
 
     init_sensor();
-    printf("fuera de init!\n");
 
     if (s_conf != NULL && s_conf->success == false) return;
 
