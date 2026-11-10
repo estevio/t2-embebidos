@@ -43,8 +43,6 @@
 #define BME688_STATUS_NEW_DATA      (1 << 7)
 #define BME688_STATUS_MEASURING     (1 << 5)
 
-#define TICKS_PER_SECOND            1000
-
 
 /*
 // Estructura que representa un mensaje de configuracion
@@ -203,7 +201,7 @@ Config *gui_conf = NULL;
 void t_queue_init(TQueue *q) {
     q->head = 0;
     q->tail = 0;
-    q->t_sum = 0;
+    q->t_sum = 0.0;
     q->in_peak = false;
     q->m = xSemaphoreCreateMutex();
 }
@@ -211,10 +209,10 @@ void t_queue_init(TQueue *q) {
 /* encola temperaturas, despues se debera llamar a _dequeue */
 void t_enqueue(TQueue *q, double temp, TickType_t tick) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        int pos = (q->tail + 1) % 150;
+        int pos = (q->tail);
         q->temps[pos] = temp;
         q->ticks[pos] = tick;
-        q->tail = pos;
+        q->tail = (pos + 1) % 150;
         q->t_sum += temp;
         xSemaphoreGive(q->m);
     }
@@ -225,9 +223,12 @@ void t_enqueue(TQueue *q, double temp, TickType_t tick) {
 void t_dequeue(TQueue *q, TickType_t ticks) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
         int fst = q->head;
+        //printf("fst-ticks: %u\tticks: %u\n", (unsigned int) q->ticks[fst], (unsigned int) ticks);
         while (q->ticks[fst] < ticks) {
+            
             q->t_sum -= q->temps[fst];
             fst++;
+            fst %= 150;
         }
         q->head = fst;
         xSemaphoreGive(q->m);
@@ -235,11 +236,13 @@ void t_dequeue(TQueue *q, TickType_t ticks) {
 }
 
 /* calcula el promedio de las mediciones dentro de la cola */
-double t_queue_avg(TQueue *q) {
+double t_queue_avg(TQueue *q, int expected_size) {
     double res = -1;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        int size = abs(q->tail - q->head);
-        res = q->t_sum / size;
+        int size = q->tail - q->head;
+        if (size < 0) size += 150;
+        if (size == expected_size) 
+            res = q->t_sum / (double) size;
         xSemaphoreGive(q->m);
     }
     return res;
@@ -453,11 +456,13 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
     if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
         if (gui_conf->h_temp || gui_conf->h_avg || gui_conf->h_pico) {
             t_enqueue(tq, temp_comp, ticks);
-            t_dequeue(tq, ticks - gui_conf->ventana * TICKS_PER_SECOND);
+            TickType_t first = ticks - pdMS_TO_TICKS(gui_conf->ventana * 1000);
+            if (first > xTaskGetTickCount()) first = 0;
+            t_dequeue(tq, first);
             if (gui_conf->h_temp) 
                 res.temp = temp_comp;
-            if (gui_conf->h_avg) 
-                res.avg = t_queue_avg(tq);
+            if (gui_conf->h_avg)
+                res.avg = t_queue_avg(tq, (int) ceil((float) gui_conf->ventana * gui_conf->frec));
             if (gui_conf->h_pico) {
                 res.pico = t_queue_peak(tq, gui_conf->umbral); // TODO: sera necesario hacer que pico sea un puntero a una estructura alocada con malloc?
             }
@@ -478,9 +483,9 @@ void read_data(void *a) {
 
     uint8_t buf[2];
 
-    for (uint32_t i = 0; i < 3; i++) {
+    for (uint32_t i = 0; i < 20; i++) {
 
-        printf("read_data: iteracion %d\n", (int) i);
+        //printf("read_data: iteracion %d\n", (int) i);
 
         buf[0] = BME688_CTRL_MEAS_ADDR;
         buf[1] = (0x1 << 5) | (0x1 << 2) | 0x1;
@@ -518,11 +523,21 @@ void read_data(void *a) {
 
             Medicion med = calc_medicion(temp_adc, press_adc, hum_adc, previous_time); // es previous time ??
 
-            printf("TEMP:\t%.2f degC\tPRESS:\t%.2f hPa\tHUM:\t%.2f %%RH\n",
+            printf("TEMP:\t%.2f degC\tPRESS:\t%.2f hPa\tHUM:\t%.2f %%RH\t",
                     med.temp, med.pres / 100.0, med.hum);
+            if (med.avg > 0)
+                printf("AVG:\t%.2f degC\t", med.avg);
+            if (med.pico.valid)
+                printf("PEAK:\t%.2f degC", med.pico.pico);
+            printf("\n");
         }
-
-        xTaskDelayUntil(&previous_time, pdMS_TO_TICKS(1000 / SAMPLE_RATE_HZ));
+        float frec = 1;
+        if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
+            frec = gui_conf->frec;
+            xSemaphoreGive(gui_conf->m);
+        }
+        float ms = 1000.0 / frec;
+        xTaskDelayUntil(&previous_time, pdMS_TO_TICKS(ms));
     }
     if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
         deinit_sensor();
@@ -545,7 +560,7 @@ void app_main(void){
     gui_conf->frec = 0.5;
     gui_conf->umbral = 28.0;
     gui_conf->ventana = 5;
-    gui_conf->h_avg = gui_conf->h_pico = false;
+    gui_conf->h_avg = gui_conf->h_pico = true;
     gui_conf->h_temp = gui_conf->h_pres = gui_conf->h_hum = true;
 
     init_sensor();
