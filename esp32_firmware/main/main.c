@@ -224,7 +224,7 @@ void t_dequeue(TQueue *q, TickType_t ticks) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
         int fst = q->head;
         //printf("fst-ticks: %u\tticks: %u\n", (unsigned int) q->ticks[fst], (unsigned int) ticks);
-        while (q->ticks[fst] < ticks) {
+        while (q->ticks[fst] <= ticks) {
             
             q->t_sum -= q->temps[fst];
             fst++;
@@ -253,24 +253,28 @@ Pico t_queue_peak(TQueue *q, double umbral) {
     Pico res;
     res.valid = false;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        int pos = q->tail;
-        double t1 = q->temps[pos - 2];
-        double t2 = q->temps[pos - 1];
-        double t3 = q->temps[pos];
-        if (q->in_peak) {
-            if (t3 < t2) q->in_peak = false;
-        }
-        else if (t3 >= umbral && t2 > t1 && t2>= 3) {
-            q->in_peak = true;
-            res.valid = true;
-            res.pico = t2;
-            res.ticks = q->ticks[pos - 1];
+        if (q->tail - q->head >= 3) {
+            int pos = q->tail - 1;
+            double t1 = q->temps[pos - 2];
+            double t2 = q->temps[pos - 1];
+            double t3 = q->temps[pos];
+            if (q->in_peak) {
+                if (t3 < t2) q->in_peak = false;
+            }
+            else if (t2 >= umbral && t2 > t1 && t2 >= t3) {
+                if (t2 > t3) q->in_peak = true;
+                res.valid = true;
+                res.pico = t2;
+                res.ticks = q->ticks[pos - 1];
+            }
         }
         xSemaphoreGive(q->m);
     }
     return res;
 }
 
+/* -------------------------------- FUNCIONES PARA (DE)INICIALIZACION ------------------------------- */
+/* inicializa el sensor, usa las variable globales s_conf y calib */
 void init_sensor(void) {
 
     s_conf->success = true;
@@ -404,6 +408,7 @@ void init_sensor(void) {
 
 }
 
+/* des-inicializa el sensor, usa la variable global s_conf*/
 void deinit_sensor(void) {
     /* Deinit driver */
     ESP_ERROR_CHECK(i2c_master_bus_rm_device(s_conf->dev_handle));
@@ -411,6 +416,11 @@ void deinit_sensor(void) {
     ESP_LOGI(TAG, "I2C de-inicializado\n");
 }
 
+/* -------------------- FUNCIONES PARA LA RECEPCION Y CALCULO DE MEDICIONES -------------------------- */
+
+/* calcula la conversion de la medicion del sensor, pasandola a las unidades 
+   de medida pedidas utilizando la variable global cal 
+   y retornando las mediciones solicitadas segun la variable global gui_conf */
 Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, TickType_t ticks) {
 
     /* Temperature [degC] */
@@ -464,7 +474,7 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
             if (gui_conf->h_avg)
                 res.avg = t_queue_avg(tq, (int) ceil((float) gui_conf->ventana * gui_conf->frec));
             if (gui_conf->h_pico) {
-                res.pico = t_queue_peak(tq, gui_conf->umbral); // TODO: sera necesario hacer que pico sea un puntero a una estructura alocada con malloc?
+                res.pico = t_queue_peak(tq, gui_conf->umbral);
             }
         }
         if (gui_conf->h_pres)
@@ -476,6 +486,9 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
     return res;
 }
 
+/* funcion que se encarga de recibir mediciones desde el sensor 
+   (y TODO: enviarlas a la gui) segun la configuracion gui_conf,
+   es una xTask */
 void read_data(void *a) {
 
     /* Read data */
@@ -483,9 +496,9 @@ void read_data(void *a) {
 
     uint8_t buf[2];
 
-    for (uint32_t i = 0; i < 20; i++) {
+    for (uint32_t i = 0; i < 50; i++) {
 
-        //printf("read_data: iteracion %d\n", (int) i);
+        printf("%d:\t", (int) i);
 
         buf[0] = BME688_CTRL_MEAS_ADDR;
         buf[1] = (0x1 << 5) | (0x1 << 2) | 0x1;
@@ -557,9 +570,9 @@ void app_main(void){
     t_queue_init(tq);
     gui_conf = (Config *) malloc(sizeof(Config));
     gui_conf->m = xSemaphoreCreateMutex();
-    gui_conf->frec = 0.5;
-    gui_conf->umbral = 28.0;
-    gui_conf->ventana = 5;
+    gui_conf->frec = 1;
+    gui_conf->umbral = 27.0;
+    gui_conf->ventana = 30;
     gui_conf->h_avg = gui_conf->h_pico = true;
     gui_conf->h_temp = gui_conf->h_pres = gui_conf->h_hum = true;
 
