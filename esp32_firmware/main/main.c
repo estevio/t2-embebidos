@@ -170,7 +170,6 @@ typedef struct {
     double hum;
     double pres;
     Average avg;
-    Pico pico;
     TickType_t tiempo;
 } Medicion;
 
@@ -438,7 +437,6 @@ void innit_medicion(Medicion *m) {
     m->hum = -1;
     m->pres = -1;
     m->temp = -1000;
-    m->pico.valid = false;
 }
 
 /* calcula la conversion de la medicion del sensor, pasandola a las unidades 
@@ -497,9 +495,6 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
                 res.temp = redondear(temp_comp);
             if (gui_conf->h_avg)
                 res.avg = t_queue_avg(tq, (int) ceil((float) gui_conf->ventana * gui_conf->frec));
-            if (gui_conf->h_pico) {
-                res.pico = t_queue_peak(tq, gui_conf->umbral);
-            }
         }
         if (gui_conf->h_pres)
             res.pres = redondear(press_comp);
@@ -519,8 +514,6 @@ char *medicion_to_jsonl(Medicion med) {
     char *jsonl = NULL;
 
     if (cJSON_AddStringToObject(json_1, "tipo", "medicion") == NULL) goto end; // esto es para manejar errores
-    int seq = 0;
-    if (cJSON_AddNumberToObject(json_1, "seq", seq) == NULL) goto end;
     int tiempo = med.tiempo * portTICK_PERIOD_MS;
     if (cJSON_AddNumberToObject(json_1, "tiempo", tiempo) == NULL) goto end;
 
@@ -659,13 +652,17 @@ void read_data(void *a) {
             uint16_t hum_adc   = (uint16_t)((data[8] << 8) | data[9]);
 
             Medicion med = calc_medicion(temp_adc, press_adc, hum_adc, previous_time); // es previous time ??
-
+            Pico p;
+            p.valid = false;
+            if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
+                if (gui_conf->h_pico) p = t_queue_peak(tq, gui_conf->umbral);
+                xSemaphoreGive(gui_conf->m);
+            }
             char *json_med = medicion_to_jsonl(med);
             printf(json_med);
             printf("\n");
-            //printf("%f",med.temp);
-            if (med.pico.valid) {
-                char *json_pic = pico_to_jsonl(med.pico);
+            if (p.valid) {
+                char *json_pic = pico_to_jsonl(p);
                 printf(json_pic);
                 printf("\n");
             }
