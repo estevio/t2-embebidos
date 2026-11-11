@@ -146,7 +146,14 @@ typedef struct {
     bool valid;
     double pico;
     TickType_t ticks;
+    double umbral;
 } Pico;
+
+/* Estructura que representa un promedio */
+typedef struct {
+    double avg;
+    bool ventana_completa;
+} Average;
 
 /* Estructura que contiene mediciones de:
     - temperatura
@@ -159,7 +166,7 @@ typedef struct {
     double temp;
     double hum;
     double pres;
-    double avg;
+    Average avg;
     Pico pico;
     TickType_t tiempo;
 } Medicion;
@@ -236,13 +243,16 @@ void t_dequeue(TQueue *q, TickType_t ticks) {
 }
 
 /* calcula el promedio de las mediciones dentro de la cola */
-double t_queue_avg(TQueue *q, int expected_size) {
-    double res = -1;
+Average t_queue_avg(TQueue *q, int expected_size) {
+    Average res;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
         int size = q->tail - q->head;
         if (size < 0) size += 150;
-        if (size == expected_size) 
-            res = q->t_sum / (double) size;
+        if (size > 0) {
+            if (size < expected_size) res.ventana_completa = false;
+            else res.ventana_completa = true;
+            res.avg = q->t_sum / (double) size;
+        }
         xSemaphoreGive(q->m);
     }
     return res;
@@ -266,6 +276,7 @@ Pico t_queue_peak(TQueue *q, double umbral) {
                 res.valid = true;
                 res.pico = t2;
                 res.ticks = q->ticks[pos - 1];
+                res.umbral = umbral;
             }
         }
         xSemaphoreGive(q->m);
@@ -416,7 +427,16 @@ void deinit_sensor(void) {
     ESP_LOGI(TAG, "I2C de-inicializado\n");
 }
 
-/* -------------------- FUNCIONES PARA LA RECEPCION Y CALCULO DE MEDICIONES -------------------------- */
+/* -------------------- FUNCIONES PARA LA RECEPCION, CALCULO Y ENVIO DE MEDICIONES -------------------------- */
+
+/* inicializa todo menos el tiempo */
+void innit_medicion(Medicion *m) {
+    m->avg.avg = -1000;
+    m->hum = -1;
+    m->pres = -1;
+    m->temp = -1000;
+    m->pico.valid = false;
+}
 
 /* calcula la conversion de la medicion del sensor, pasandola a las unidades 
    de medida pedidas utilizando la variable global cal 
@@ -463,6 +483,7 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
         hum_comp = 0.0;
 
     Medicion res;
+    innit_medicion(&res);
     if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
         if (gui_conf->h_temp || gui_conf->h_avg || gui_conf->h_pico) {
             t_enqueue(tq, temp_comp, ticks);
@@ -481,9 +502,109 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
             res.pres = press_comp;
         if (gui_conf->h_hum)
             res.hum = hum_comp;
+        res.tiempo = ticks;
         xSemaphoreGive(gui_conf->m);
     }
     return res;
+}
+
+/* genera un string json_lines a partir de una Medicion */
+char *medicion_to_jsonl(Medicion med) {
+    cJSON *json_1 = cJSON_CreateObject();
+    cJSON *json_2 = cJSON_CreateObject();
+    cJSON *json_3 = cJSON_CreateObject();
+    char *jsonl = NULL;
+
+    if (cJSON_AddStringToObject(json_1, "tipo", "medicion") == NULL) goto end;
+    double seq = 0;
+    if (cJSON_AddNumberToObject(json_1, "seq", seq) == NULL) goto end;
+    double tiempo = med.tiempo * portTICK_PERIOD_MS;
+    if (cJSON_AddNumberToObject(json_1, "tiempo", tiempo) == NULL) goto end;
+
+    if (med.temp != -1000){
+        if (cJSON_AddNumberToObject(json_2, "temp", med.temp) == NULL) goto end;
+    }
+    if (med.hum != -1) {
+        if (cJSON_AddNumberToObject(json_2, "hum", med.hum) == NULL) goto end;
+    }
+    if (med.pres != -1) {
+        if (cJSON_AddNumberToObject(json_2, "pres", med.pres) == NULL) goto end;
+    }
+
+    if (med.avg.avg != -1000) {
+        if (cJSON_AddNumberToObject(json_3, "avg", med.avg.avg) == NULL) goto end;
+        if (cJSON_AddBoolToObject(json_3, "ventana_completa", med.avg.ventana_completa) == NULL) goto end;
+    }
+
+    char *string_1 = cJSON_PrintUnformatted(json_1);
+    char *string_2 = cJSON_PrintUnformatted(json_2);
+    char *string_3 = cJSON_PrintUnformatted(json_3);
+
+    int len1 = strlen(string_1);
+    int len2 = strlen(string_2);
+    int len3 = strlen(string_3);
+
+    int len = len1 + len2 + len3;
+    jsonl = (char *) malloc(len * sizeof(char));
+
+    if (len1 > 2){
+        snprintf(jsonl, (len1) * sizeof(char), string_1);
+        strcat(jsonl, "\n");
+    } else goto end;
+    if (len2 > 2) {
+        string_2++;
+        strncat(jsonl, string_2, (len2 - 2) * sizeof(char));
+        strcat(jsonl, "\n");
+    }
+    if (len3 > 2) {
+        string_3++;
+        strncat(jsonl, string_3, (len3 -1) * sizeof(char));
+    }
+
+    end:
+        cJSON_Delete(json_1);
+        cJSON_Delete(json_2);
+        cJSON_Delete(json_3);
+        return jsonl;
+
+}
+
+/* genera un string json lines a partir de un Pico  */
+char *pico_to_jsonl(Pico p) {
+
+    cJSON *json_1 = cJSON_CreateObject();
+    cJSON *json_2 = cJSON_CreateObject();
+    char *jsonl = NULL;
+
+    if (cJSON_AddStringToObject(json_1, "tipo", "pico") == NULL) goto end;
+    double tiempo = p.ticks * portTICK_PERIOD_MS;
+    if (cJSON_AddNumberToObject(json_1, "tiempo", tiempo) == NULL) goto end;
+
+    if (cJSON_AddNumberToObject(json_2, "temp_pico", p.pico) == NULL) goto end;
+    if (cJSON_AddNumberToObject(json_2, "umbral", p.umbral) == NULL) goto end;
+
+    char *string_1 = cJSON_PrintUnformatted(json_1);
+    char *string_2 = cJSON_PrintUnformatted(json_2);
+
+    int len1 = strlen(string_1);
+    int len2 = strlen(string_2);
+
+    int len = len1 + len2;
+    jsonl = (char *) malloc(len * sizeof(char));
+
+    if (len1 > 2){
+        snprintf(jsonl, (len1) * sizeof(char), string_1);
+        strcat(jsonl, "\n");
+    } else goto end;
+    if (len2 > 2) {
+        string_2++;
+        strncat(jsonl, string_2, (len2 - 1) * sizeof(char));
+    }
+
+    end:
+        cJSON_Delete(json_1);
+        cJSON_Delete(json_2);
+        return jsonl;
 }
 
 /* funcion que se encarga de recibir mediciones desde el sensor 
@@ -496,7 +617,7 @@ void read_data(void *a) {
 
     uint8_t buf[2];
 
-    for (uint32_t i = 0; i < 50; i++) {
+    for (uint32_t i = 0; i < 20; i++) {
 
         printf("%d:\t", (int) i);
 
@@ -536,12 +657,13 @@ void read_data(void *a) {
 
             Medicion med = calc_medicion(temp_adc, press_adc, hum_adc, previous_time); // es previous time ??
 
-            printf("TEMP:\t%.2f degC\tPRESS:\t%.2f hPa\tHUM:\t%.2f %%RH\t",
-                    med.temp, med.pres / 100.0, med.hum);
-            if (med.avg > 0)
-                printf("AVG:\t%.2f degC\t", med.avg);
-            if (med.pico.valid)
-                printf("PEAK:\t%.2f degC", med.pico.pico);
+            //char *json_med = medicion_to_jsonl(med);
+            //printf(json_med);
+            printf("%f",med.temp);
+            if (med.pico.valid) {
+                char *json_pic = pico_to_jsonl(med.pico);
+                printf(json_pic);
+            }
             printf("\n");
         }
         float frec = 1;
@@ -572,7 +694,7 @@ void app_main(void){
     gui_conf->m = xSemaphoreCreateMutex();
     gui_conf->frec = 1;
     gui_conf->umbral = 27.0;
-    gui_conf->ventana = 30;
+    gui_conf->ventana = 5;
     gui_conf->h_avg = gui_conf->h_pico = true;
     gui_conf->h_temp = gui_conf->h_pres = gui_conf->h_hum = true;
 
