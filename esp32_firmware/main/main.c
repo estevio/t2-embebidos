@@ -515,7 +515,7 @@ char *medicion_to_jsonl(Medicion med) {
     cJSON *json_3 = cJSON_CreateObject();
     char *jsonl = NULL;
 
-    if (cJSON_AddStringToObject(json_1, "tipo", "medicion") == NULL) goto end;
+    if (cJSON_AddStringToObject(json_1, "tipo", "medicion") == NULL) goto end; // esto es para manejar errores
     double seq = 0;
     if (cJSON_AddNumberToObject(json_1, "seq", seq) == NULL) goto end;
     double tiempo = med.tiempo * portTICK_PERIOD_MS;
@@ -657,9 +657,9 @@ void read_data(void *a) {
 
             Medicion med = calc_medicion(temp_adc, press_adc, hum_adc, previous_time); // es previous time ??
 
-            //char *json_med = medicion_to_jsonl(med);
-            //printf(json_med);
-            printf("%f",med.temp);
+            char *json_med = medicion_to_jsonl(med);
+            printf(json_med);
+            //printf("%f",med.temp);
             if (med.pico.valid) {
                 char *json_pic = pico_to_jsonl(med.pico);
                 printf(json_pic);
