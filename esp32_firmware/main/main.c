@@ -44,6 +44,9 @@
 #define BME688_STATUS_MEASURING     (1 << 5)
 
 
+#define redondear(v) round((v)*100.0)/100.0
+
+
 /*
 // Estructura que representa un mensaje de configuracion
 typedef struct {
@@ -173,9 +176,9 @@ typedef struct {
 
 // Estructura que representa la configuracion actual
 typedef struct {
-    float frec;
+    double frec;
     int ventana;
-    float umbral;
+    double umbral;
     bool h_temp;
     bool h_hum;
     bool h_pres;
@@ -251,7 +254,7 @@ Average t_queue_avg(TQueue *q, int expected_size) {
         if (size > 0) {
             if (size < expected_size) res.ventana_completa = false;
             else res.ventana_completa = true;
-            res.avg = q->t_sum / (double) size;
+            res.avg = redondear(q->t_sum / (double) size);
         }
         xSemaphoreGive(q->m);
     }
@@ -486,12 +489,12 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
     innit_medicion(&res);
     if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
         if (gui_conf->h_temp || gui_conf->h_avg || gui_conf->h_pico) {
-            t_enqueue(tq, temp_comp, ticks);
+            t_enqueue(tq, redondear(temp_comp), ticks);
             TickType_t first = ticks - pdMS_TO_TICKS(gui_conf->ventana * 1000);
             if (first > xTaskGetTickCount()) first = 0;
             t_dequeue(tq, first);
             if (gui_conf->h_temp) 
-                res.temp = temp_comp;
+                res.temp = redondear(temp_comp);
             if (gui_conf->h_avg)
                 res.avg = t_queue_avg(tq, (int) ceil((float) gui_conf->ventana * gui_conf->frec));
             if (gui_conf->h_pico) {
@@ -499,9 +502,9 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
             }
         }
         if (gui_conf->h_pres)
-            res.pres = press_comp;
+            res.pres = redondear(press_comp);
         if (gui_conf->h_hum)
-            res.hum = hum_comp;
+            res.hum = redondear(hum_comp);
         res.tiempo = ticks;
         xSemaphoreGive(gui_conf->m);
     }
@@ -516,9 +519,9 @@ char *medicion_to_jsonl(Medicion med) {
     char *jsonl = NULL;
 
     if (cJSON_AddStringToObject(json_1, "tipo", "medicion") == NULL) goto end; // esto es para manejar errores
-    double seq = 0;
+    int seq = 0;
     if (cJSON_AddNumberToObject(json_1, "seq", seq) == NULL) goto end;
-    double tiempo = med.tiempo * portTICK_PERIOD_MS;
+    int tiempo = med.tiempo * portTICK_PERIOD_MS;
     if (cJSON_AddNumberToObject(json_1, "tiempo", tiempo) == NULL) goto end;
 
     if (med.temp != -1000){
@@ -577,7 +580,7 @@ char *pico_to_jsonl(Pico p) {
     char *jsonl = NULL;
 
     if (cJSON_AddStringToObject(json_1, "tipo", "pico") == NULL) goto end;
-    double tiempo = p.ticks * portTICK_PERIOD_MS;
+    int tiempo = p.ticks * portTICK_PERIOD_MS;
     if (cJSON_AddNumberToObject(json_1, "tiempo", tiempo) == NULL) goto end;
 
     if (cJSON_AddNumberToObject(json_2, "temp_pico", p.pico) == NULL) goto end;
@@ -659,12 +662,14 @@ void read_data(void *a) {
 
             char *json_med = medicion_to_jsonl(med);
             printf(json_med);
+            printf("\n");
             //printf("%f",med.temp);
             if (med.pico.valid) {
                 char *json_pic = pico_to_jsonl(med.pico);
                 printf(json_pic);
+                printf("\n");
             }
-            printf("\n");
+            
         }
         float frec = 1;
         if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
