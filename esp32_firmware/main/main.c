@@ -12,8 +12,6 @@
 #include <freertos/semphr.h>
 #include <esp_random.h>
 
-void app_main(void) {
-
 #include <portmacro.h>
 #include <esp_log.h>
 #include <esp_err.h>

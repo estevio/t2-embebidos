@@ -17,6 +17,7 @@ class DataReceiver(QObject):
     frec_changed = pyqtSignal(str)
     toggle_envio = pyqtSignal(int, bool)
     toggle_habilitar = pyqtSignal(int, bool)
+    request_full_data_config = pyqtSignal()
 
     error_msg = pyqtSignal(str)
 
@@ -43,8 +44,13 @@ class DataReceiver(QObject):
 
             time.sleep(0.3)
 
+    # idea: send_uart recibe una señal que debe emitir en caso de que no se esté conectado
     def send_uart(self):
-        pass
+
+        # revisar si esta conectado
+        if not self.conectado:
+            return
+        # sino, convertir el mensaje a json y añadir un comando que envia la config al esp
 
     def decode_uart(self):
         pass
@@ -113,19 +119,27 @@ class DataReceiver(QObject):
     @pyqtSlot()
     def conectar(self):
 
-        if self.conectado:
-            self.ser.close()
-            self.ser = None
-            self.conectado = False
-            self.toggle_conectar.emit()
-        elif self.port == "Seleccione un puerto":
-            self.error_msg.emit("Seleccione un purto")
-        else:
-            try:
-                self.ser = serial.Serial(self.port, self.baud)
-                self.toggle_conectar.emit()
-                self.conectado = True
-            except:
-                self.error_msg.emit("Error de conexión")
+        def command():
+            if self.conectado:
+                self.ser.close()
                 self.ser = None
                 self.conectado = False
+                self.toggle_conectar.emit()
+            elif self.port == "Seleccione un puerto":
+                self.error_msg.emit("Seleccione un purto")
+            else:
+                try:
+                    self.ser = serial.Serial(self.port, self.baud)
+                    self.toggle_conectar.emit()
+                    self.conectado = True
+                except:
+                    self.error_msg.emit("Error de conexión")
+                    self.ser = None
+                    self.conectado = False
+        self.command_queue.put(command)
+
+    @pyqtSlot(dict)
+    def get_full_data_config(self):
+
+        def command_habilitar():
+            pass

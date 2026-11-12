@@ -17,7 +17,7 @@ Envío de configuraciones
 
 (config-tipo, config-val):
     ("frec_muestreo", (0.5, 1, 2 o 5))
-    ("habilitar",("tem", "hum", "pre", "avg", "pic"))
+    ("habilitar",("temp", "hum", "pres", "avg", "pico"))
     ("ventana_avg", (5, 10, 30 o 60))
     ("umbral_pico", (float))
 ```
@@ -66,12 +66,13 @@ Confirmación de configuraciones
 
 TODO magda
   - conectar sin reiniciar
-  - leer desde uart (python) 
+  - leer desde uart (python)
   - leer desde uart (C) 
   - escribir a uart (pyton) 
   - escribir a uart (C) 
   - implementar cola de comandos
   - manejar overflows ticks 
+  - manejar setteo de configuraciones sin haber establecido conexion
 
 TODO galindo
   - config to json (python)
