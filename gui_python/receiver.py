@@ -168,7 +168,8 @@ class DataReceiver(QObject):
             self.set_frecuencia_muestreo(f_str)
 
         elif "ventana_avg" in data:
-            self.set_ventana(str(int(data["ventana_avg"])))
+            if hasattr(self, "set_ventana"):
+                self.set_ventana(str(int(data["ventana_avg"])))
 
         elif "umbral" in data:
             self.set_umbral(float(data["umbral"]))
