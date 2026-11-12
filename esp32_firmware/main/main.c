@@ -10,6 +10,9 @@
 #include <freertos/task.h>
 #include <driver/uart.h>
 #include <freertos/semphr.h>
+#include <esp_random.h>
+
+void app_main(void) {
 
 #include <portmacro.h>
 #include <esp_log.h>
