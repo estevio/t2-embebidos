@@ -11,14 +11,14 @@ Envío de configuraciones
 
 (config, config-val):
     ("frec_muestreo", (0.5, 1, 2 o 5))
-    ("habilitar",("temp", "hum", "pres", "avg", "pico"))
+    ("habilitar",("tem", "hum", "pre", "avg", "pic"))
     ("ventana_avg", (5, 10, 30 o 60))
     ("umbral_pico", (float))
 ```
 
 ### ESP32 -> GUI
 
-Recepción de mediciones
+Envío de mediciones
 
 ```
 {"tipo": "medicion","seq":(int),"tiempo":(int),
@@ -26,7 +26,7 @@ Recepción de mediciones
  "avg":(float),"ventana_completa":(bool)}
 ```
 
-Recepción de picos de temperatura
+Envío de picos de temperatura
 
 ```
 {"tipo": "pico","tiempo":(int),
@@ -36,11 +36,11 @@ Recepción de picos de temperatura
 Confirmación de configuraciones
 
 ```
-{"tipo":"ack","status":("ok" o "rech"),(config):(config-val)}
+{"tipo":"ack","status":("ok" o "na"),(config):(config-val)}
 
 (config, config-val):
     ("frec_muestreo", (0.5, 1, 2 o 5))
-    ("habilitar",("temp", "hum", "pres", "avg", "pico"))
+    ("habilitar",("tem", "hum", "pre", "avg", "pic"))
     ("ventana_avg", (5, 10, 30 o 60))
     ("umbral_pico", (float))
 ```

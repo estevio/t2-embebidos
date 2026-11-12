@@ -1,8 +1,8 @@
 import time
 import random as rnd
+import serial
 from queue import Queue
 from PyQt6.QtCore import QObject, pyqtSlot, pyqtSignal
-from gui import GUI
 
 class DataReceiver(QObject):
 
@@ -18,10 +18,14 @@ class DataReceiver(QObject):
     toggle_envio = pyqtSignal(int, bool)
     toggle_habilitar = pyqtSignal(int, bool)
 
-    def __init__(self, gui: GUI):
+    error_msg = pyqtSignal(str)
+
+    def __init__(self):
         super().__init__()
         self.command_queue = Queue()
 
+        self.port = "Seleccione un puerto"
+        self.baud = 115200
         self.ser = None
         self.conectado = False
 
@@ -98,6 +102,30 @@ class DataReceiver(QObject):
         #print("llamando a set_umbral desde reciever")
         self.umbral_changed.emit(v)
 
+    @pyqtSlot(str)
+    def set_port(self, name: str):
+        self.port = name
+
+    @pyqtSlot(str)
+    def set_baud(self, val: str):
+        self.baud = int(val)
+
     @pyqtSlot()
     def conectar(self):
-        self.toggle_conectar.emit()
+
+        if self.conectado:
+            self.ser.close()
+            self.ser = None
+            self.conectado = False
+            self.toggle_conectar.emit()
+        elif self.port == "Seleccione un puerto":
+            self.error_msg.emit("Seleccione un purto")
+        else:
+            try:
+                self.ser = serial.Serial(self.port, self.baud)
+                self.toggle_conectar.emit()
+                self.conectado = True
+            except:
+                self.error_msg.emit("Error de conexión")
+                self.ser = None
+                self.conectado = False
