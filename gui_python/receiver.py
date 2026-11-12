@@ -11,11 +11,12 @@ class DataReceiver(QObject):
     data_recvd_hum = pyqtSignal(float)
     data_recvd_pres = pyqtSignal(float)
     data_recvd_avg = pyqtSignal(float)
-    data_recvd_peak = pyqtSignal(float)
+    data_recvd_peak = pyqtSignal(str, str)
 
     toggle_conectar = pyqtSignal()
     umbral_changed = pyqtSignal(float)
     frec_changed = pyqtSignal(str)
+    ventana_changed = pyqtSignal(str)
     toggle_envio = pyqtSignal(int, bool)
     toggle_habilitar = pyqtSignal(int, bool)
 
@@ -47,8 +48,20 @@ class DataReceiver(QObject):
     def send_uart(self):
         pass
 
-    def decode_uart(self):
-        pass
+    def decode_uart(self, line: str):
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            self.error_msg.emit("Error: JSON invalido recibido")
+            return
+
+        tipo = data.get("tipo")
+        if tipo == "medicion":
+            self.medida_from_json(line)
+        elif tipo == "pico":
+            self.pico_from_json(line)
+        elif tipo == "ack":
+            self.ack_from_json(line)
 
     # envía la solicitud a la esp
     @pyqtSlot(int, bool)
@@ -59,12 +72,14 @@ class DataReceiver(QObject):
         var = 1: humedad;
         var = 2: presion
         """
-        # construir mensaje
-        # enviar solicitud
+        nombres = ["temp", "hum", "pres"]
+        msg_json = self.config_to_json("habilitar", nombres[var], val)
+        self.command_queue.put(msg_json)
         self.send_uart()
 
         # mientras no haya conexion real
-        self.set_envio(var, val)
+        if not self.conectado:
+            self.set_envio(var, val)
 
     # recibe la confirmacion de la esp
     def set_envio(self, var: int, val: bool):
@@ -76,9 +91,15 @@ class DataReceiver(QObject):
         # enviar señal a conf_datos y graf
         self.toggle_envio.emit(var, val)
 
+    @pyqtSlot(int, bool)
     def request_set_habilitar(self, var: int, val: bool):
+        nombres = ["avg", "pico"]
+        msg_json = self.config_to_json("habilitar", nombres[var], val)
+        self.command_queue.put(msg_json)
+        self.send_uart()
 
-        self.set_habilitar(var, val)
+        if not self.conectado:
+            self.set_habilitar(var, val)
 
     def set_habilitar(self, var: int, b: bool):
 
@@ -86,18 +107,37 @@ class DataReceiver(QObject):
 
     @pyqtSlot(str)
     def request_set_frecuencia_muestreo(self, v: str):
-        #print("request a set_frecuencia desde receiver")
+        msg_json = self.config_to_json("frec_muestreo", float(v))
+        self.command_queue.put(msg_json)
         self.send_uart()
-        self.set_frecuencia_muestreo(v)
+
+        if not self.conectado:
+            self.set_frecuencia_muestreo(v)
 
     def set_frecuencia_muestreo(self, v: str):
         #print("llamando a set_frecuencia desde receiver")
         self.frec_changed.emit(v)
 
+    @pyqtSlot(str)
+    def request_set_ventana(self, v: str):
+        msg_json = self.config_to_json("ventana_avg", int(v))
+        self.command_queue.put(msg_json)
+        self.send_uart()
+
+        if not self.conectado:
+            self.set_ventana(v)
+
+    def set_ventana(self, v: str):
+        self.ventana_changed.emit(v)
+
     @pyqtSlot(float)
     def request_set_umbral(self, v: float):
-        #print("request a set_umbral desde receiver")
-        self.set_umbral(v)
+        msg_json = self.config_to_json("umbral", round(float(v), 1))
+        self.command_queue.put(msg_json)
+        self.send_uart()
+
+        if not self.conectado:
+            self.set_umbral(v)
 
     def set_umbral(self, v: float):
         #print("llamando a set_umbral desde reciever")
@@ -207,12 +247,13 @@ class DataReceiver(QObject):
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError:
-            print("Error: JSON de pico invalido")
+            self.error_msg.emit("Error: JSON de pico invalido")
             return
 
         if data.get("tipo") != "pico":
             return
 
         if "temp_pico" in data:
-            # self.data_recvd_peak.emit(str(data["tiempo"]), str(data["temp_pico"]))
-            self.data_recvd_peak.emit(float(data["temp_pico"]))
+            tiempo_str = str(data.get("tiempo", ""))
+            temp_str = str(data["temp_pico"])
+            self.data_recvd_peak.emit(tiempo_str, temp_str)
