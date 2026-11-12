@@ -13,7 +13,7 @@ if __name__ == "__main__":
     window = QMainWindow()
     gui = GUI(window)
 
-    receiver = DataReceiver(gui)
+    receiver = DataReceiver()
     thread = threading.Thread(target=receiver.receiver_loop, daemon=True)
 
     # conexiones con graph
@@ -40,11 +40,14 @@ if __name__ == "__main__":
     # conectar con umbral
     gui.data_config.request_umbral.connect(receiver.request_set_umbral)
     receiver.umbral_changed.connect(gui.data_config.set_umbral)
-    # conectar con frecuencia
 
     # conexiones con conexion
     gui.conexion_config.conectar_toggled.connect(receiver.conectar)
     receiver.toggle_conectar.connect(gui.conexion_config.toggle_conectar)
+    gui.conexion_config.ui.comboBox_puerto.currentTextChanged.connect(receiver.set_port)
+    gui.conexion_config.ui.comboBox_baud_rate.currentTextChanged.connect(receiver.set_baud)
+
+    receiver.error_msg.connect(gui.error_popup)
     
     thread.start()
     window.show()
