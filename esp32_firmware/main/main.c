@@ -12,8 +12,6 @@
 #include <freertos/semphr.h>
 #include <esp_random.h>
 
-void app_main(void) {
-
 #include <portmacro.h>
 #include <esp_log.h>
 #include <esp_err.h>
@@ -243,6 +241,49 @@ Config *gui_conf = NULL;
 
 /* --------------------------------------- FUNCIONES PARA TQUEUE --------------------------------------------- */
 
+char *ack_to_json(ConfigMsg cfg) {
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) return NULL;
+
+    cJSON_AddStringToObject(root, "tipo", "ack");
+
+    if (!cfg.valid) {
+        cJSON_AddStringToObject(root, "status", "error");
+        char *err_str = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        return err_str;
+    }
+
+    // Actualizar gui_conf protegiendo con su mutex
+    if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
+        if (strcmp(cfg.canal, "frec_muestreo") == 0) {
+            gui_conf->frec = cfg.frec;
+            cJSON_AddNumberToObject(root, "frec_muestreo", cfg.frec);
+        } else if (strcmp(cfg.canal, "ventana_avg") == 0) {
+            gui_conf->ventana = cfg.ventana;
+            cJSON_AddNumberToObject(root, "ventana_avg", cfg.ventana);
+        } else if (strcmp(cfg.canal, "umbral") == 0) {
+            gui_conf->umbral = redondear(cfg.umbral);
+            cJSON_AddNumberToObject(root, "umbral", gui_conf->umbral);
+        } else if (strcmp(cfg.canal, "habilitar") == 0) {
+            if (strcmp(cfg.habilitar, "temp") == 0) gui_conf->h_temp = cfg.val;
+            else if (strcmp(cfg.habilitar, "hum") == 0) gui_conf->h_hum = cfg.val;
+            else if (strcmp(cfg.habilitar, "pres") == 0) gui_conf->h_pres = cfg.val;
+            else if (strcmp(cfg.habilitar, "avg") == 0) gui_conf->h_avg = cfg.val;
+            else if (strcmp(cfg.habilitar, "pico") == 0) gui_conf->h_pico = cfg.val;
+
+            cJSON_AddStringToObject(root, "habilitar", cfg.habilitar);
+            cJSON_AddBoolToObject(root, "val", cfg.val);
+        }
+        xSemaphoreGive(gui_conf->m);
+    }
+
+    cJSON_AddStringToObject(root, "status", "ok");
+    char *jsonl = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return jsonl;
+}
+
 /* inicializador de una cola de temperaturas */
 void t_queue_init(TQueue *q) {
     q->head = 0;
@@ -302,19 +343,25 @@ Pico t_queue_peak(TQueue *q, double umbral) {
     Pico res;
     res.valid = false;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        if (q->tail - q->head >= 3) {
-            int pos = q->tail - 1;
-            double t1 = q->temps[pos - 2];
-            double t2 = q->temps[pos - 1];
-            double t3 = q->temps[pos];
+        int size = (q->tail - q->head + 150) % 150;
+        if (size >= 3) {
+            
+            int i3 = (q->tail - 1 + 150) % 150; // muestra k (actual)
+            int i2 = (q->tail - 2 + 150) % 150; // muestra k-1 (candidata a pico)
+            int i1 = (q->tail - 3 + 150) % 150; // muestra k-2 (anterior)
+            
+            double t1 = q->temps[i1]; //anterior
+            double t2 = q->temps[i2]; //candidata
+            double t3 = q->temps[i3]; //actual
+
             if (q->in_peak) {
-                if (t3 < t2) q->in_peak = false;
+                if (t3 != t2) q->in_peak = false;
             }
             else if (t2 >= umbral && t2 > t1 && t2 >= t3) {
-                if (t2 > t3) q->in_peak = true;
+                if (t2 == t3) q->in_peak = true;
                 res.valid = true;
                 res.pico = t2;
-                res.ticks = q->ticks[pos - 1];
+                res.ticks = q->ticks[i2];
                 res.umbral = umbral;
             }
         }
@@ -759,45 +806,3 @@ void app_main(void){
     // configurar el sensor (?)
     // Enviar confirmacion
 }
-
-char *ack_to_json(ConfigMsg cfg) {
-    cJSON *root = cJSON_CreateObject();
-    if (root == NULL) return NULL;
-
-    cJSON_AddStringToObject(root, "tipo", "ack");
-
-    if (!cfg.valid) {
-        cJSON_AddStringToObject(root, "status", "error");
-        char *err_str = cJSON_PrintUnformatted(root);
-        cJSON_Delete(root);
-        return err_str;
-    }
-
-    // Actualizar gui_conf protegiendo con su mutex
-    if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
-        if (strcmp(cfg.canal, "frec_muestreo") == 0) {
-            gui_conf->frec = cfg.frec;
-            cJSON_AddNumberToObject(root, "frec_muestreo", cfg.frec);
-        } else if (strcmp(cfg.canal, "ventana_avg") == 0) {
-            gui_conf->ventana = cfg.ventana;
-            cJSON_AddNumberToObject(root, "ventana_avg", cfg.ventana);
-        } else if (strcmp(cfg.canal, "umbral") == 0) {
-            gui_conf->umbral = redondear(cfg.umbral);
-            cJSON_AddNumberToObject(root, "umbral", gui_conf->umbral);
-        } else if (strcmp(cfg.canal, "habilitar") == 0) {
-            if (strcmp(cfg.habilitar, "temp") == 0) gui_conf->h_temp = cfg.val;
-            else if (strcmp(cfg.habilitar, "hum") == 0) gui_conf->h_hum = cfg.val;
-            else if (strcmp(cfg.habilitar, "pres") == 0) gui_conf->h_pres = cfg.val;
-            else if (strcmp(cfg.habilitar, "avg") == 0) gui_conf->h_avg = cfg.val;
-            else if (strcmp(cfg.habilitar, "pico") == 0) gui_conf->h_pico = cfg.val;
-
-            cJSON_AddStringToObject(root, "habilitar", cfg.habilitar);
-            cJSON_AddBoolToObject(root, "val", cfg.val);
-        }
-        xSemaphoreGive(gui_conf->m);
-    }
-
-    cJSON_AddStringToObject(root, "status", "ok");
-    char *jsonl = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    return jsonl;
