@@ -61,3 +61,25 @@ Confirmación de configuraciones
   "config": "config-tipo"
   "config-tipo":"config-val}
 ``
+
+## TODO
+
+TODO magda
+  - conectar sin reiniciar
+  - leer desde uart (python) 
+  - leer desde uart (C) 
+  - escribir a uart (pyton) 
+  - escribir a uart (C) 
+  - implementar cola de comandos
+  - manejar overflows ticks 
+
+TODO galindo
+  - config to json (python)
+  - ack from json (python)
+  - config from json (C)
+  - ack to json (C)
+  - medida from json (python)
+  - pico from json (python)
+
+
+  - revisar detecto de picos (C)
