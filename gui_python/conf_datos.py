@@ -10,6 +10,7 @@ class AppConfDatos(QWidget):
     request_frecuencia = pyqtSignal(str)
     envio_changed = pyqtSignal(int, bool)
     request_habilitar = pyqtSignal(int, bool)
+    request_ventana = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -48,6 +49,11 @@ class AppConfDatos(QWidget):
 
         self.ui.checkBox_habilitar_media.toggled.connect(lambda: self.request_set_habilitar(0))
         self.ui.checkBox_habilitar_picos.toggled.connect(lambda: self.request_set_habilitar(1))
+
+        self.ui.doubleSpinBox_umbral.setValue(28.0)
+        self.last_umbral = 28.0
+        self.last_ventana_index = self.ui.comboBox_media.currentIndex()
+        self.ui.comboBox_media.currentTextChanged.connect(self.request_set_ventana)
 
     def check_var(self, v: int):
 
@@ -132,6 +138,20 @@ class AppConfDatos(QWidget):
         self.ui.comboBox_frec_muestreo.setCurrentIndex(i)
         self.ui.comboBox_frec_muestreo.blockSignals(False)
         self.last_frec_index = i
+
+    def request_set_ventana(self, v: str):
+        self.ui.comboBox_media.blockSignals(True)
+        self.ui.comboBox_media.setCurrentIndex(self.last_ventana_index)
+        self.ui.comboBox_media.blockSignals(False)
+        self.request_ventana.emit(v)
+
+    @pyqtSlot(str)
+    def set_ventana(self, v: str):
+        i = self.ui.comboBox_media.findText(v)
+        self.ui.comboBox_media.blockSignals(True)
+        self.ui.comboBox_media.setCurrentIndex(i)
+        self.ui.comboBox_media.blockSignals(False)
+        self.last_ventana_index = i
 
 if __name__ == "__main__":
     app = QApplication([])

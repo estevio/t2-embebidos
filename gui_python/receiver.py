@@ -12,6 +12,7 @@ class DataReceiver(QObject):
     data_recvd_pres = pyqtSignal(float)
     data_recvd_avg = pyqtSignal(float, bool)
     data_recvd_peak = pyqtSignal(str, str)
+    status_recvd = pyqtSignal(str)
 
     toggle_conectar = pyqtSignal()
     umbral_changed = pyqtSignal(float)
@@ -34,16 +35,27 @@ class DataReceiver(QObject):
     def receiver_loop(self):
 
         while True:
-
-            t_measure = rnd.random() * 20
-            h_measure = rnd.random() * 60 + 20
-            p_measure = rnd.random() * 50 + 100
-
-            self.data_recvd_temp.emit(t_measure)
-            self.data_recvd_hum.emit(h_measure)
-            self.data_recvd_pres.emit(p_measure)
-
-            time.sleep(0.3)
+            if self.conectado and self.ser is not None and self.ser.is_open:
+                try:
+                    if self.ser.in_waiting > 0:
+                        raw_line = self.ser.readline()
+                        line = raw_line.decode("utf-8", errors="ignore").strip()
+                        if line.startswith("{") and line.endswith("}"):
+                            self.decode_uart(line)
+                    else:
+                        time.sleep(0.01)
+                except (serial.SerialException, OSError):
+                    self.conectado = False
+                    try:
+                        self.ser.close()
+                    except Exception:
+                        pass
+                    self.ser = None
+                    self.toggle_conectar.emit()
+                    self.status_recvd.emit("Desconectado (puerto perdido)")
+                    self.error_msg.emit("Se perdió la conexión serial con el ESP32")
+            else:
+                time.sleep(0.05)
 
     def send_uart(self):
         pass
@@ -62,6 +74,12 @@ class DataReceiver(QObject):
             self.pico_from_json(line)
         elif tipo == "ack":
             self.ack_from_json(line)
+        elif tipo == "estado":
+            estado = data.get("estado", "desconocido")
+            msg = data.get("msg", "")
+            self.status_recvd.emit(f"{estado}: {msg}" if msg else estado)
+            if "error" in estado:
+                self.error_msg.emit(f"ESP32 reporta {estado}: {msg}")
 
     # envía la solicitud a la esp
     @pyqtSlot(int, bool)
@@ -155,22 +173,25 @@ class DataReceiver(QObject):
     def conectar(self):
 
         if self.conectado:
-            self.ser.close()
+            if self.ser:
+                self.ser.close()
             self.ser = None
             self.conectado = False
             self.toggle_conectar.emit()
+            self.status_recvd.emit("Desconectado")
         elif self.port == "Seleccione un puerto":
-            self.error_msg.emit("Seleccione un purto")
+            self.error_msg.emit("Seleccione un puerto válido")
         else:
             try:
-                self.ser = serial.Serial(self.port, self.baud)
-                self.toggle_conectar.emit()
+                self.ser = serial.Serial(self.port, self.baud, timeout=0.2)
                 self.conectado = True
+                self.toggle_conectar.emit()
+                self.status_recvd.emit(f"Conectado en {self.port} ({self.baud} bps)")
             except:
-                self.error_msg.emit("Error de conexión")
+                self.error_msg.emit("Error de conexión: {e}")
                 self.ser = None
                 self.conectado = False
-
+                self.status_recvd.emit("Error de conexión")
 
     # From - To JSON
 
@@ -193,13 +214,12 @@ class DataReceiver(QObject):
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError:
-            print("Error: JSON de ack invalido")
             return
 
         if data.get("tipo") != "ack":
             return
         if data.get("status") == "error":
-            print(f"Error en ACK: {data.get('msg', '')}")
+            self.error_msg.emit(f"Comando rechazado por ESP32: {data.get('msg', 'formato inválido')}")
             return
 
         if "frec_muestreo" in data:
@@ -208,8 +228,7 @@ class DataReceiver(QObject):
             self.set_frecuencia_muestreo(f_str)
 
         elif "ventana_avg" in data:
-            if hasattr(self, "set_ventana"):
-                self.set_ventana(str(int(data["ventana_avg"])))
+            self.set_ventana(str(int(data["ventana_avg"])))
 
         elif "umbral" in data:
             self.set_umbral(float(data["umbral"]))
@@ -240,7 +259,8 @@ class DataReceiver(QObject):
         if "pres" in data:
             self.data_recvd_pres.emit(float(data["pres"]))
         if "avg" in data:
-            self.data_recvd_avg.emit(float(data["avg"]))
+            completa = bool(data.get("ventana_completa", True))
+            self.data_recvd_avg.emit(float(data["avg"]), completa)
 
     def pico_from_json(self, json_str: str):
         """Parsea el JSON de 'pico' enviado por el ESP32 y emite el evento."""
@@ -254,6 +274,8 @@ class DataReceiver(QObject):
             return
 
         if "temp_pico" in data:
-            tiempo_str = str(data.get("tiempo", ""))
-            temp_str = str(data["temp_pico"])
+            tiempo_str = str(data.get("tiempo", 0))
+            tiempo_str = f"{float(t_ms)/1000.0:.2f} s"
+            umbral_str = f" (umbral {data.get('umbral')} °C)" if "umbral" in data else ""
+            temp_str = f"{data['temp_pico']} °C{umbral_str}"
             self.data_recvd_peak.emit(tiempo_str, temp_str)
