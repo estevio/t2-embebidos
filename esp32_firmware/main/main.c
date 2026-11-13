@@ -47,7 +47,7 @@
 
 #define redondear(v) round((v)*100.0)/100.0
 
-
+#define TQUEUE_SIZE 310
 
 // Estructura que representa un mensaje de configuracion
 typedef struct {
@@ -270,6 +270,7 @@ typedef struct {
     TickType_t ticks[150];
     int head;
     int tail;
+    int count;
     double t_sum;
     bool in_peak;
     SemaphoreHandle_t m;
@@ -288,6 +289,7 @@ Config *gui_conf = NULL;
 void t_queue_init(TQueue *q) {
     q->head = 0;
     q->tail = 0;
+    q->count = 0;
     q->t_sum = 0.0;
     q->in_peak = false;
     q->m = xSemaphoreCreateMutex();
@@ -296,11 +298,17 @@ void t_queue_init(TQueue *q) {
 /* encola temperaturas, despues se debera llamar a _dequeue */
 void t_enqueue(TQueue *q, double temp, TickType_t tick) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
+        if (q->count == TQUEUE_SIZE){
+            q->t_sum -= q->temps[q->head];
+            q->head = (q->head + 1) % TQUEUE_SIZE;
+            q->count--;
+        }
         int pos = (q->tail);
         q->temps[pos] = temp;
         q->ticks[pos] = tick;
-        q->tail = (pos + 1) % 150;
+        q->tail = (pos + 1) % TQUEUE_SIZE;
         q->t_sum += temp;
+        q->count++;
         xSemaphoreGive(q->m);
     }
 }
@@ -309,13 +317,12 @@ void t_enqueue(TQueue *q, double temp, TickType_t tick) {
 // ticks debe ser el tiempo de la ultima medicion menos los ticks correspondientes a la ventana actual
 void t_dequeue(TQueue *q, TickType_t ticks) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        int fst = q->head;
         //printf("fst-ticks: %u\tticks: %u\n", (unsigned int) q->ticks[fst], (unsigned int) ticks);
-        while (q->ticks[fst] <= ticks) {
+        while (q->count > 0 && (current_ticks - q->ticks[q->head]) >= window_ticks) {
             
-            q->t_sum -= q->temps[fst];
-            fst++;
-            fst %= 150;
+            q->t_sum -= q->temps[q->head];
+            q->head = (q->head + 1) % TQUEUE_SIZE;
+            q->count--;
         }
         q->head = fst;
         xSemaphoreGive(q->m);
@@ -323,15 +330,13 @@ void t_dequeue(TQueue *q, TickType_t ticks) {
 }
 
 /* calcula el promedio de las mediciones dentro de la cola */
-Average t_queue_avg(TQueue *q, int expected_size) {
-    Average res;
+Average t_queue_avg(TQueue *q, int expected_size, TickType_t window_ticks) {
+    Average res = { .avg = -1000, .ventana_completa = false };;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        int size = q->tail - q->head;
-        if (size < 0) size += 150;
-        if (size > 0) {
-            if (size < expected_size) res.ventana_completa = false;
-            else res.ventana_completa = true;
-            res.avg = redondear(q->t_sum / (double) size);
+        if (q->count > 0) {
+            // La ventana es completa si ya transcurrió al menos W desde la primera medición o desde el arranque
+            res.ventana_completa = (current_ticks >= window_ticks);
+            res.avg = redondear(q->t_sum / (double)q->count);
         }
         xSemaphoreGive(q->m);
     }
@@ -340,24 +345,21 @@ Average t_queue_avg(TQueue *q, int expected_size) {
 
 /* busca picos de temperatura y retorna una estructura pico */
 Pico t_queue_peak(TQueue *q, double umbral) {
-    Pico res;
-    res.valid = false;
+    Pico res = { .valid = false, .pico = 0, .ticks = 0, .umbral = umbral };
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        int size = (q->tail - q->head + 150) % 150;
-        if (size >= 3) {
+        if (q->count >= 3) {
             
-            int i3 = (q->tail - 1 + 150) % 150; // muestra k (actual)
-            int i2 = (q->tail - 2 + 150) % 150; // muestra k-1 (candidata a pico)
-            int i1 = (q->tail - 3 + 150) % 150; // muestra k-2 (anterior)
-            
-            double t1 = q->temps[i1]; //anterior
-            double t2 = q->temps[i2]; //candidata
-            double t3 = q->temps[i3]; //actual
+            int i3 = (q->tail - 1 + TQUEUE_SIZE) % TQUEUE_SIZE; // muestra k (actual)
+            int i2 = (q->tail - 2 + TQUEUE_SIZE) % TQUEUE_SIZE; // muestra k-1 (candidata)
+            int i1 = (q->tail - 3 + TQUEUE_SIZE) % TQUEUE_SIZE; // muestra k-2 (anterior)
+
+            double t1 = q->temps[i1];
+            double t2 = q->temps[i2];
+            double t3 = q->temps[i3];
 
             if (q->in_peak) {
                 if (t3 != t2) q->in_peak = false;
-            }
-            else if (t2 >= umbral && t2 > t1 && t2 >= t3) {
+            } else if (t2 >= umbral && t2 > t1 && t2 >= t3) {
                 if (t2 == t3) q->in_peak = true;
                 res.valid = true;
                 res.pico = t2;
@@ -570,18 +572,18 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
     Medicion res;
     innit_medicion(&res);
     if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
+        TickType_t window_ticks = pdMS_TO_TICKS(gui_conf->ventana * 1000);
         if (gui_conf->h_temp || gui_conf->h_avg || gui_conf->h_pico) {
             t_enqueue(tq, redondear(temp_comp), ticks);
-            TickType_t first = ticks - pdMS_TO_TICKS(gui_conf->ventana * 1000);
-            if (first > xTaskGetTickCount()) first = 0;
-            t_dequeue(tq, first);
+            t_dequeue(tq, first, window_ticks);
+
             if (gui_conf->h_temp) 
                 res.temp = redondear(temp_comp);
             if (gui_conf->h_avg)
-                res.avg = t_queue_avg(tq, (int) ceil((float) gui_conf->ventana * gui_conf->frec));
+                res.avg = t_queue_avg(tq, ticks, window_ticks);
         }
         if (gui_conf->h_pres)
-            res.pres = redondear(press_comp);
+            res.pres = redondear(press_comp/100.0);
         if (gui_conf->h_hum)
             res.hum = redondear(hum_comp);
         res.tiempo = ticks;

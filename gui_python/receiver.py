@@ -10,7 +10,7 @@ class DataReceiver(QObject):
     data_recvd_temp = pyqtSignal(float)
     data_recvd_hum = pyqtSignal(float)
     data_recvd_pres = pyqtSignal(float)
-    data_recvd_avg = pyqtSignal(float)
+    data_recvd_avg = pyqtSignal(float, bool)
     data_recvd_peak = pyqtSignal(str, str)
 
     toggle_conectar = pyqtSignal()
