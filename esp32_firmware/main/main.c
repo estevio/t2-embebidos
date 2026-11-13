@@ -737,27 +737,27 @@ ConfigMsg *find_config_msg(char* msg) {
     int max_len = strlen(msg);
     int beg = strcspn(msg, "{");
     int end = strcspn(msg, "}");
-    ConfigMsg ret;
+    ConfigMsg *ret = malloc(sizeof(ConfigMsg));
     if (beg == max_len) {
         msg[0] = '\0';
-        ret.valid = false;
-        return &ret;
+        ret->valid = false;
+        return ret;
     }
     else if (end == max_len) {
         if (beg > 0) {
-            char *aux[max_len];
+            char aux[max_len];
             strncpy(aux, (msg + beg), max_len);
             strncpy(msg, aux, max_len);
         }
-        ret.valid = false;
-        return &ret;
+        ret->valid = false;
+        return ret;
     }
     else {
-        char *aux[max_len];
+        char aux[max_len];
         strncpy(aux, (msg + beg), max_len);
         strncpy(msg, aux, (end - beg + 1));
-        ret.valid = true;
-        return &ret;
+        ret->valid = true;
+        return ret;
     }
     
 }
@@ -778,20 +778,49 @@ bool change_config(ConfigMsg *conf) {
     if (!conf->valid) {
         return false;
     }
+    bool ret_val = false;
     if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
 
         if (strncmp(conf->canal, "frec_muestreo", 16)) {
             gui_conf->frec = conf->frec;
-            return true;
+            ret_val = true;
         }
-        if (strncmp(conf->canal, "ventana_avg", 16)) {
+        else if (strncmp(conf->canal, "ventana_avg", 16)) {
             gui_conf->ventana = conf->ventana;
-            return true;
+            ret_val = true;
         }
-        // if 
+        else if (strncmp(conf->canal, "umbral", 16)) {
+            gui_conf->umbral = conf->umbral;
+            ret_val = true;
+        }
+        else if (strncmp(conf->canal, "habilitar", 16)) {
+            char *var = conf->habilitar;
+            bool val = conf->val;
+            if (strncmp(var, "temp", 10)) {
+                gui_conf->h_temp = val;
+                ret_val = true;
+            }
+            if (strncmp(var, "pres", 10)) {
+                gui_conf->h_pres = val;
+                ret_val = true;
+            }
+            if (strncmp(var, "hum", 10)) {
+                gui_conf->h_hum = val;
+                ret_val = true;
+            }
+            if (strncmp(var, "avg", 10)) {
+                gui_conf->h_avg = val;
+                ret_val = true;
+            }
+            if (strncmp(var, "pico", 10)) {
+                gui_conf->h_pico = val;
+                ret_val = true;
+            }
+        }
 
         xSemaphoreGive(gui_conf->m);
     }
+    return ret_val;
 }
 
 void receive_uart(void *a) {
@@ -815,9 +844,18 @@ void receive_uart(void *a) {
 
             ConfigMsg *conf = (ConfigMsg *) malloc(sizeof(ConfigMsg));
             conf = find_config_msg(cache);
-            while (!conf->valid) {
+            bool cond = conf->valid;
+            
+            while (cond) {
                 // modificar configuracion
                 conf = find_config_msg(cache);
+                cond = conf->valid;
+                conf->valid = change_config(conf);
+                char *ack =  ack_to_json(*conf);
+                uint8_t *ack_bytes = (uint8_t *) ack;
+                if (ack != NULL) {
+                    uart_write_bytes(UART_PORT_NUM, ack_bytes, strlen(ack) * sizeof(char));
+                }
             }
         }
     }
@@ -844,7 +882,5 @@ void app_main(void){
     if (s_conf != NULL && s_conf->success == false) return;
 
     xTaskCreate(read_data, "TaskReadData", 4096, NULL, 2, NULL);
-
-    // Recibir configuracion de la gui
-    // Enviar confirmacion
+    xTaskCreate(receive_uart, "TaskReceiveUart", 4096, NULL, 2, NULL);
 }

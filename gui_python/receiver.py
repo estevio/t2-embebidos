@@ -92,7 +92,8 @@ class DataReceiver(QObject):
         try:
             data = json.loads(line)
         except json.JSONDecodeError:
-            self.error_msg.emit("Error: JSON invalido recibido")
+            # self.error_msg.emit("Error: JSON invalido recibido")
+            print("Error: JSON invalido recibido")
             return
 
         tipo = data.get("tipo")
