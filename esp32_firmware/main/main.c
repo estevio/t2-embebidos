@@ -12,8 +12,6 @@
 #include <freertos/semphr.h>
 #include <esp_random.h>
 
-void app_main(void) {
-
 #include <portmacro.h>
 #include <esp_log.h>
 #include <esp_err.h>
@@ -50,65 +48,142 @@ void app_main(void) {
 #define redondear(v) round((v)*100.0)/100.0
 
 
-/*
+
 // Estructura que representa un mensaje de configuracion
 typedef struct {
+    bool valid;
+    char canal[16];     // "frec_muestreo", "habilitar", "ventana_avg", "umbral"
     float frec;
-    char* habilitar;
+    char habilitar[10]; // "temp", "hum", "pres", "avg", "pico"
+    bool val;
     int ventana;
     float umbral;
 } ConfigMsg;
 
 ConfigMsg config_from_json(char *json) {
+    ConfigMsg res;
+    memset(&res, 0, sizeof(ConfigMsg));
+    res.valid = false;
 
-    if (strlen(json) == 0) return;
+    if (json == NULL || strlen(json) == 0) return res;
 
-    cJSON *root = cJSON_Parse(json)
+    cJSON *root = cJSON_Parse(json);
     if (root == NULL) {
         printf("Error al analizar la linea JSON\n");
-        return;
+        return res;
     }
 
     cJSON *tipo = cJSON_GetObjectItem(root, "tipo");
-    if (! cJSON_IsString(tipo)) {
-        printf("Error al leer JSON: sin tipo\n");
-        return;
+    if (!cJSON_IsString(tipo) || strcmp(tipo->valuestring, "conf") != 0) {
+        printf("Error al leer JSON: sin tipo conf\n");
+        cJSON_Delete(root);
+        return res;
     }
-
-    ConfigMsg res;
-    memset(&res, 0, sizeof(ConfigMsg));
 
     cJSON *frec = cJSON_GetObjectItem(root, "frec_muestreo");
     if (frec != NULL) {
-        if (! cJSON_IsNumber(frec)) {
-            printf("Error: frec no es null ni number\n");
-            return;
+        if (!cJSON_IsNumber(frec)) {
+            printf("Error: frec no es number\n");
+            cJSON_Delete(root);
+            return res;
         }
-        res.frec = (float) frec->valuedouble;
-        return res
+        strcpy(res.canal, "frec_muestreo");
+        res.frec = (float)frec->valuedouble;
+        res.valid = true;
+        cJSON_Delete(root);
+        return res;
     }
 
     cJSON *habi = cJSON_GetObjectItem(root, "habilitar");
-    if (habi != NULL) {
-        if (! cJSON_IsString(habi)) {
-            printf("Error: habi no es null ni str")
-            return;
+    cJSON *val  = cJSON_GetObjectItem(root, "val");
+    if (habi != NULL && val != NULL) {
+        if (!cJSON_IsString(habi) || !cJSON_IsBool(val)) {
+            printf("Error: habi no es str o val no es bool\n");
+            cJSON_Delete(root);
+            return res;
         }
-        res.habilitar = habi->valuestring;
+        strcpy(res.canal, "habilitar");
+        strncpy(res.habilitar, habi->valuestring, sizeof(res.habilitar) - 1);
+        res.val = cJSON_IsTrue(val);
+        res.valid = true;
+        cJSON_Delete(root);
         return res;
     }
 
     cJSON *vent = cJSON_GetObjectItem(root, "ventana_avg");
     if (vent != NULL) {
-        if (! cJSON_IsNumber(vent)) {
-            printf("Error: vent no es ni string ni number");
-            return;
+        if (!cJSON_IsNumber(vent)) {
+            printf("Error: vent no es number\n");
+            cJSON_Delete(root);
+            return res;
         }
+        strcpy(res.canal, "ventana_avg");
         res.ventana = vent->valueint;
+        res.valid = true;
+        cJSON_Delete(root);
+        return res;
     }
 
+    cJSON *umb = cJSON_GetObjectItem(root, "umbral");
+    if (umb != NULL) {
+        if (!cJSON_IsNumber(umb)) {
+            printf("Error: umbral no es number\n");
+            cJSON_Delete(root);
+            return res;
+        }
+        strcpy(res.canal, "umbral");
+        res.umbral = (float)umb->valuedouble;
+        res.valid = true;
+        cJSON_Delete(root);
+        return res;
+    }
+
+    cJSON_Delete(root);
+    return res;
 }
-*/
+
+char *ack_to_json(ConfigMsg cfg) {
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) return NULL;
+
+    cJSON_AddStringToObject(root, "tipo", "ack");
+
+    if (!cfg.valid) {
+        cJSON_AddStringToObject(root, "status", "error");
+        char *err_str = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        return err_str;
+    }
+
+    // Actualizar gui_conf protegiendo con su mutex
+    if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
+        if (strcmp(cfg.canal, "frec_muestreo") == 0) {
+            gui_conf->frec = cfg.frec;
+            cJSON_AddNumberToObject(root, "frec_muestreo", cfg.frec);
+        } else if (strcmp(cfg.canal, "ventana_avg") == 0) {
+            gui_conf->ventana = cfg.ventana;
+            cJSON_AddNumberToObject(root, "ventana_avg", cfg.ventana);
+        } else if (strcmp(cfg.canal, "umbral") == 0) {
+            gui_conf->umbral = redondear(cfg.umbral);
+            cJSON_AddNumberToObject(root, "umbral", gui_conf->umbral);
+        } else if (strcmp(cfg.canal, "habilitar") == 0) {
+            if (strcmp(cfg.habilitar, "temp") == 0) gui_conf->h_temp = cfg.val;
+            else if (strcmp(cfg.habilitar, "hum") == 0) gui_conf->h_hum = cfg.val;
+            else if (strcmp(cfg.habilitar, "pres") == 0) gui_conf->h_pres = cfg.val;
+            else if (strcmp(cfg.habilitar, "avg") == 0) gui_conf->h_avg = cfg.val;
+            else if (strcmp(cfg.habilitar, "pico") == 0) gui_conf->h_pico = cfg.val;
+
+            cJSON_AddStringToObject(root, "habilitar", cfg.habilitar);
+            cJSON_AddBoolToObject(root, "val", cfg.val);
+        }
+        xSemaphoreGive(gui_conf->m);
+    }
+
+    cJSON_AddStringToObject(root, "status", "ok");
+    char *jsonl = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return jsonl;
+}
 
 /*  --------------------------------  ESTRUCTURAS  ---------------------------------   */
 
@@ -268,19 +343,25 @@ Pico t_queue_peak(TQueue *q, double umbral) {
     Pico res;
     res.valid = false;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        if (q->tail - q->head >= 3) {
-            int pos = q->tail - 1;
-            double t1 = q->temps[pos - 2];
-            double t2 = q->temps[pos - 1];
-            double t3 = q->temps[pos];
+        int size = (q->tail - q->head + 150) % 150;
+        if (size >= 3) {
+            
+            int i3 = (q->tail - 1 + 150) % 150; // muestra k (actual)
+            int i2 = (q->tail - 2 + 150) % 150; // muestra k-1 (candidata a pico)
+            int i1 = (q->tail - 3 + 150) % 150; // muestra k-2 (anterior)
+            
+            double t1 = q->temps[i1]; //anterior
+            double t2 = q->temps[i2]; //candidata
+            double t3 = q->temps[i3]; //actual
+
             if (q->in_peak) {
-                if (t3 < t2) q->in_peak = false;
+                if (t3 != t2) q->in_peak = false;
             }
             else if (t2 >= umbral && t2 > t1 && t2 >= t3) {
-                if (t2 > t3) q->in_peak = true;
+                if (t2 == t3) q->in_peak = true;
                 res.valid = true;
                 res.pico = t2;
-                res.ticks = q->ticks[pos - 1];
+                res.ticks = q->ticks[i2];
                 res.umbral = umbral;
             }
         }
@@ -509,101 +590,48 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
     return res;
 }
 
-/* genera un string json_lines a partir de una Medicion */
+/* genera un string json_lines (1 sola linea) a partir de una Medicion */
 char *medicion_to_jsonl(Medicion med) {
-    cJSON *json_1 = cJSON_CreateObject();
-    cJSON *json_2 = cJSON_CreateObject();
-    cJSON *json_3 = cJSON_CreateObject();
-    char *jsonl = NULL;
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) return NULL;
 
-    if (cJSON_AddStringToObject(json_1, "tipo", "medicion") == NULL) goto end; // esto es para manejar errores
+    cJSON_AddStringToObject(root, "tipo", "medicion");
     int tiempo = med.tiempo * portTICK_PERIOD_MS;
-    if (cJSON_AddNumberToObject(json_1, "tiempo", tiempo) == NULL) goto end;
+    cJSON_AddNumberToObject(root, "tiempo", tiempo);
 
-    if (med.temp != -1000){
-        if (cJSON_AddNumberToObject(json_2, "temp", med.temp) == NULL) goto end;
+    if (med.temp != -1000) {
+        cJSON_AddNumberToObject(root, "temp", med.temp);
     }
     if (med.hum != -1) {
-        if (cJSON_AddNumberToObject(json_2, "hum", med.hum) == NULL) goto end;
+        cJSON_AddNumberToObject(root, "hum", med.hum);
     }
     if (med.pres != -1) {
-        if (cJSON_AddNumberToObject(json_2, "pres", med.pres) == NULL) goto end;
+        cJSON_AddNumberToObject(root, "pres", med.pres);
     }
-
     if (med.avg.avg != -1000) {
-        if (cJSON_AddNumberToObject(json_3, "avg", med.avg.avg) == NULL) goto end;
-        if (cJSON_AddBoolToObject(json_3, "ventana_completa", med.avg.ventana_completa) == NULL) goto end;
+        cJSON_AddNumberToObject(root, "avg", med.avg.avg);
+        cJSON_AddBoolToObject(root, "ventana_completa", med.avg.ventana_completa);
     }
 
-    char *string_1 = cJSON_PrintUnformatted(json_1);
-    char *string_2 = cJSON_PrintUnformatted(json_2);
-    char *string_3 = cJSON_PrintUnformatted(json_3);
-
-    int len1 = strlen(string_1);
-    int len2 = strlen(string_2);
-    int len3 = strlen(string_3);
-
-    int len = len1 + len2 + len3;
-    jsonl = (char *) malloc(len * sizeof(char));
-
-    if (len1 > 2){
-        snprintf(jsonl, (len1) * sizeof(char), string_1);
-        strcat(jsonl, "\n");
-    } else goto end;
-    if (len2 > 2) {
-        string_2++;
-        strncat(jsonl, string_2, (len2 - 2) * sizeof(char));
-        strcat(jsonl, "\n");
-    }
-    if (len3 > 2) {
-        string_3++;
-        strncat(jsonl, string_3, (len3 -1) * sizeof(char));
-    }
-
-    end:
-        cJSON_Delete(json_1);
-        cJSON_Delete(json_2);
-        cJSON_Delete(json_3);
-        return jsonl;
-
+    char *jsonl = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return jsonl;
 }
 
-/* genera un string json lines a partir de un Pico  */
+/* genera un string json_lines (1 sola linea) a partir de un Pico */
 char *pico_to_jsonl(Pico p) {
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) return NULL;
 
-    cJSON *json_1 = cJSON_CreateObject();
-    cJSON *json_2 = cJSON_CreateObject();
-    char *jsonl = NULL;
-
-    if (cJSON_AddStringToObject(json_1, "tipo", "pico") == NULL) goto end;
+    cJSON_AddStringToObject(root, "tipo", "pico");
     int tiempo = p.ticks * portTICK_PERIOD_MS;
-    if (cJSON_AddNumberToObject(json_1, "tiempo", tiempo) == NULL) goto end;
+    cJSON_AddNumberToObject(root, "tiempo", tiempo);
+    cJSON_AddNumberToObject(root, "temp_pico", p.pico);
+    cJSON_AddNumberToObject(root, "umbral", p.umbral);
 
-    if (cJSON_AddNumberToObject(json_2, "temp_pico", p.pico) == NULL) goto end;
-    if (cJSON_AddNumberToObject(json_2, "umbral", p.umbral) == NULL) goto end;
-
-    char *string_1 = cJSON_PrintUnformatted(json_1);
-    char *string_2 = cJSON_PrintUnformatted(json_2);
-
-    int len1 = strlen(string_1);
-    int len2 = strlen(string_2);
-
-    int len = len1 + len2;
-    jsonl = (char *) malloc(len * sizeof(char));
-
-    if (len1 > 2){
-        snprintf(jsonl, (len1) * sizeof(char), string_1);
-        strcat(jsonl, "\n");
-    } else goto end;
-    if (len2 > 2) {
-        string_2++;
-        strncat(jsonl, string_2, (len2 - 1) * sizeof(char));
-    }
-
-    end:
-        cJSON_Delete(json_1);
-        cJSON_Delete(json_2);
-        return jsonl;
+    char *jsonl = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return jsonl;
 }
 
 /* funcion que se encarga de recibir mediciones desde el sensor 
