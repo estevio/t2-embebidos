@@ -54,13 +54,20 @@ class Grafico(FigureCanvasQTAgg):
         self.redraw()
 
 class AppGrafico(QWidget):
-    def __init__(self, titulo: str = "titulo"):
+    def __init__(self, titulo: str = "titulo", unidad: str = ""):
         QWidget.__init__(self)
         self.ui = Ui_Grafico()
         self.ui.setupUi(self)
+        self.titulo_base = titulo
+        self.unidad = unidad
         self.graf = Grafico()
-        self.ui.title.setText(titulo)
+        self.ui.title.setText(f"{self.titulo_base} [{self.unidad}]")
         self.ui.graph_layout.addWidget(self.graf)
+
+    @pyqtSlot(float)
+    def update_point(self, val: float):
+        self.ui.title.setText(f"{self.titulo_base}: {val:.2f} {self.unidad}")
+        self.graf.add_point(val)
 
     @pyqtSlot(bool)
     def toggle_visibility(self, b: bool):
@@ -92,9 +99,10 @@ class AppGraficoTemp(QWidget):
         self.ui.tableWidget_picos.setItem(r, 0, QTableWidgetItem(tiempo))
         self.ui.tableWidget_picos.setItem(r, 1, QTableWidgetItem(temp))
 
-    def change_avg(self, v: float):
-        # TODO: validar avg
-        self.ui.label_media_2.setText(f"Ultima media reportada: {str(v)}")
+    @pyqtSlot(float, bool)
+    def change_avg(self, v: float, completa: bool):
+        estado_ventana = "(ventana completa)" if completa else "(llenando ventana...)"
+        self.ui.label_media_2.setText(f"Última media reportada: {v:.2f} °C {estado_ventana}")
 
     @pyqtSlot(bool)
     def toggle_visibility(self, b: bool):
