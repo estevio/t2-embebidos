@@ -55,6 +55,10 @@ if __name__ == "__main__":
     gui.data_config.request_ventana.connect(receiver.request_set_ventana)
     receiver.ventana_changed.connect(gui.data_config.set_ventana)
 
+
+    receiver.request_full_data_config.connect(gui.data_config.send_full_data_config)
+    gui.data_config.emit_full_data_config.connect(receiver.get_full_data_config)
+
     window.statusBar().showMessage("Estado ESP32: Desconectado")
     receiver.status_recvd.connect(lambda s: window.statusBar().showMessage(f"Estado ESP32: {s}"))
 

@@ -11,7 +11,7 @@ class AppConfDatos(QWidget):
     envio_changed = pyqtSignal(int, bool)
     request_habilitar = pyqtSignal(int, bool)
     request_ventana = pyqtSignal(str)
-    send_full_data_config = pyqtSignal(dict)
+    emit_full_data_config = pyqtSignal(dict)
 
 
     def __init__(self):
@@ -154,6 +154,7 @@ class AppConfDatos(QWidget):
         self.ui.comboBox_media.setCurrentIndex(i)
         self.ui.comboBox_media.blockSignals(False)
         self.last_ventana_index = i
+    
     @pyqtSlot()
     def send_full_data_config(self):
         conf = {}
@@ -174,7 +175,7 @@ class AppConfDatos(QWidget):
         conf["frec_muestreo"] = float(self.ui.comboBox_frec_muestreo.currentText())
         conf["umbral_pico"] = self.ui.doubleSpinBox_umbral.value()
 
-        self.send_full_data_config.emit(conf)
+        self.emit_full_data_config.emit(conf)
 
 if __name__ == "__main__":
     app = QApplication([])
