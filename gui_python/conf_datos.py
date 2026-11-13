@@ -151,8 +151,8 @@ class AppConfDatos(QWidget):
             aux.append("pico")
         conf["habilitar"] = aux
 
-        conf["ventana_avg"] = self.ui.comboBox_media.currentText()
-        conf["frec_muestreo"] = self.ui.comboBox_frec_muestreo.currentText()
+        conf["ventana_avg"] = int(self.ui.comboBox_media.currentText())
+        conf["frec_muestreo"] = float(self.ui.comboBox_frec_muestreo.currentText())
         conf["umbral_pico"] = self.ui.doubleSpinBox_umbral.value()
 
         self.send_full_data_config.emit(conf)

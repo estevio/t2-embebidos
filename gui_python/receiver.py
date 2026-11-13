@@ -303,7 +303,27 @@ class DataReceiver(QObject):
         self.command_queue.put(command)
 
     @pyqtSlot(dict)
-    def get_full_data_config(self):
+    def get_full_data_config(self, data: dict):
 
-        def command_habilitar():
-            pass
+        options = ["temp", "hum", "pres", "avg", "pico"]
+        for var in options:
+            set_to = var in data["habilitar"]
+            def command():
+                msg = self.config_to_json("habilitar", valor=var, val_bool=set_to)
+                self.send_uart(msg)
+            self.command_queue.put(command)
+
+        def command():
+            msg = self.config_to_json("ventana_avg", data["ventana_avg"])
+            self.send_uart(msg)
+        self.command_queue.put(command)
+
+        def command():
+            msg = self.config_to_json("frec_muestreo", data["frec_muestreo"])
+            self.send_uart(msg)
+        self.command_queue.put(command)
+
+        def command():
+            msg = self.config_to_json("umbral_pico", data["umbral_pico"])
+            self.send_uart(msg)
+        self.command_queue.put(command)
