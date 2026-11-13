@@ -733,6 +733,96 @@ void read_data(void *a) {
 
 }
 
+ConfigMsg *find_config_msg(char* msg) {
+    int max_len = strlen(msg);
+    int beg = strcspn(msg, "{");
+    int end = strcspn(msg, "}");
+    ConfigMsg ret;
+    if (beg == max_len) {
+        msg[0] = '\0';
+        ret.valid = false;
+        return &ret;
+    }
+    else if (end == max_len) {
+        if (beg > 0) {
+            char *aux[max_len];
+            strncpy(aux, (msg + beg), max_len);
+            strncpy(msg, aux, max_len);
+        }
+        ret.valid = false;
+        return &ret;
+    }
+    else {
+        char *aux[max_len];
+        strncpy(aux, (msg + beg), max_len);
+        strncpy(msg, aux, (end - beg + 1));
+        ret.valid = true;
+        return &ret;
+    }
+    
+}
+
+/*
+typedef struct {
+    bool valid;
+    char canal[16];     // "frec_muestreo", "habilitar", "ventana_avg", "umbral"
+    float frec;
+    char habilitar[10]; // "temp", "hum", "pres", "avg", "pico"
+    bool val;
+    int ventana;
+    float umbral;
+} ConfigMsg;
+ */
+
+bool change_config(ConfigMsg *conf) {
+    if (!conf->valid) {
+        return false;
+    }
+    if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
+
+        if (strncmp(conf->canal, "frec_muestreo", 16)) {
+            gui_conf->frec = conf->frec;
+            return true;
+        }
+        if (strncmp(conf->canal, "ventana_avg", 16)) {
+            gui_conf->ventana = conf->ventana;
+            return true;
+        }
+        // if 
+
+        xSemaphoreGive(gui_conf->m);
+    }
+}
+
+void receive_uart(void *a) {
+
+    int cach_size = 256;
+    int data_size = cach_size/2;
+
+    char *cache = (char *) malloc(cach_size*sizeof(char));
+    cache[0] = '\0';
+    uint8_t *data = (uint8_t *) malloc(data_size);
+
+    while (true) {
+        
+        int len = uart_read_bytes(UART_PORT_NUM, data, (data_size-1), pdMS_TO_TICKS(100));
+
+        if (len > 0) {
+            data[len] = '\0';
+            char *texto = (char *) data;
+            // if (strlen(texto) >= cach_size - strlen(cache))  // reacomodar cache
+            strncat(cache, texto, 255);
+
+            ConfigMsg *conf = (ConfigMsg *) malloc(sizeof(ConfigMsg));
+            conf = find_config_msg(cache);
+            while (!conf->valid) {
+                // modificar configuracion
+                conf = find_config_msg(cache);
+            }
+        }
+    }
+}
+
 void app_main(void){
 
     mutex = xSemaphoreCreateMutex();
