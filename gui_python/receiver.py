@@ -33,19 +33,36 @@ class DataReceiver(QObject):
         self.conectado = False
 
     def receiver_loop(self):
-
+        
+        PAQUETE_SIZE = 8
+        
         while True:
+            
+            time.sleep(0.001)
 
-            t_measure = rnd.random() * 20
-            h_measure = rnd.random() * 60 + 20
-            p_measure = rnd.random() * 50 + 100
+            while not self.command_queue.empty():
+                command = self.command_queue.get_nowait()
+                command()
 
-            self.data_recvd_temp.emit(t_measure)
-            self.data_recvd_hum.emit(h_measure)
-            self.data_recvd_pres.emit(p_measure)
+            if self.conectado == False:
+                continue
 
-            time.sleep(0.3)
+            cach = b""
+            try:
+                if self.ser.in_waiting >= PAQUETE_SIZE:
 
+                    cach += self.ser.read(PAQUETE_SIZE)
+
+                    beg = cach.find(b"{\"tipo")
+                    end = cach.find(b"}")
+                    if beg > -1 and end > -1:
+                        msg = cach[beg, end+1]
+                        cach = cach[end+2,]
+                        self.decode_uart(msg)
+            except:
+                print("Error en receiver loop D:")
+
+            
     def checksum(self, msg: bytes):
         chk = 0
         for character in msg:
@@ -60,8 +77,8 @@ class DataReceiver(QObject):
         # sino, añadir un comando que envia la config al esp
         def command():
             msg_to_send = msg.encode()
-            check = self.checksum(msg_to_send)
-            msg_to_send = str(check).encode() + msg_to_send
+            #check = self.checksum(msg_to_send)
+            #msg_to_send = str(check).encode() + msg_to_send
             try:
                 self.ser.write(msg_to_send)
             except:
@@ -296,8 +313,12 @@ class DataReceiver(QObject):
                     self.ser = serial.Serial(self.port, self.baud)
                     self.toggle_conectar.emit()
                     self.conectado = True
+                except Exception as e:
+                    self.error_msg.emit(f"Error de conexión {e}")
+                    self.ser = None
+                    self.conectado = False
                 except:
-                    self.error_msg.emit("Error de conexión")
+                    self.error_msg.emit(f"Error de conexión desconocido")
                     self.ser = None
                     self.conectado = False
         self.command_queue.put(command)
