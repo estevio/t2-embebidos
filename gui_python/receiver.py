@@ -40,29 +40,33 @@ class DataReceiver(QObject):
         
         while True:
             while not self.command_queue.empty():
-                    command = self.command_queue.get_nowait()
-                    command()
-            if self.conectado and self.ser is not None and self.ser.is_open:
-                try:
-                    if self.ser.in_waiting > 0:
-                        raw_line = self.ser.readline()
-                        line = raw_line.decode("utf-8", errors="ignore").strip()
-                        if line.startswith("{") and line.endswith("}"):
-                            self.decode_uart(line)
-                    else:
-                        time.sleep(0.01)
-                except (serial.SerialException, OSError):
-                    self.conectado = False
-                    try:
-                        self.ser.close()
-                    except Exception:
-                        pass
-                    self.ser = None
-                    self.toggle_conectar.emit()
-                    self.status_recvd.emit("Desconectado (puerto perdido)")
-                    self.error_msg.emit("Se perdió la conexión serial con el ESP32")
-            else:
-                time.sleep(0.05)
+                command = self.command_queue.get_nowait()
+                command()
+        #     if self.conectado and self.ser is not None and self.ser.is_open:
+        #         try:
+        #             if self.ser.in_waiting > 0:
+        #                 raw_line = self.ser.readline()
+        #                 line = raw_line.decode("utf-8", errors="ignore").strip()
+        #                 print(line)
+        #                 if line.startswith("{") and line.endswith("}"):
+        #                     self.decode_uart(line)
+        #             else:
+        #                 time.sleep(0.01)
+        #         except (serial.SerialException, OSError):
+        #             self.conectado = False
+        #             try:
+        #                 self.ser.close()
+        #             except Exception:
+        #                 pass
+        #             self.ser = None
+        #             self.toggle_conectar.emit()
+        #             self.status_recvd.emit("Desconectado (puerto perdido)")
+        #             self.error_msg.emit("Se perdió la conexión serial con el ESP32")
+        #     else:
+        #         time.sleep(0.05)
+
+            if self.conectado == False:
+                continue
 
             try:
                 if self.ser.in_waiting >= PAQUETE_SIZE:
@@ -74,9 +78,9 @@ class DataReceiver(QObject):
                     # print(f"beg: {beg}\tend: {end}\tcach: {cach.decode()}")
                     if beg > -1 and end > -1:
                         msg = cach[beg: end+1]
-                        #print(f"msg:{msg.decode()}")
+                        print(f"msg:{msg.decode()}")
                         cach = cach[end+1:]
-                        #print(f"cach:{cach.decode()}")
+                        print(f"cach:{cach.decode()}")
                         self.decode_uart(msg)
             except Exception as e:
                 print(f"Error en receiver loop {e}")
@@ -100,12 +104,14 @@ class DataReceiver(QObject):
             #msg_to_send = str(check).encode() + msg_to_send
             try:
                 self.ser.write(msg_to_send)
+                print(f"mensaje enviado: {msg}")
             except:
                 self.error_msg.emit(f"Error al enviar mensaje de configuracion")
         self.command_queue.put(command)
 
     def decode_uart(self, line: str):
         try:
+            print(line)
             data = json.loads(line)
         except json.JSONDecodeError:
             # self.error_msg.emit("Error: JSON invalido recibido")
@@ -343,7 +349,7 @@ class DataReceiver(QObject):
 
         if "temp_pico" in data:
             tiempo_str = str(data.get("tiempo", 0))
-            tiempo_str = f"{float(t_ms)/1000.0:.2f} s"
+            tiempo_str = f"{float(tiempo_str)/1000.0:.2f} s"
             umbral_str = f" (umbral {data.get('umbral')} °C)" if "umbral" in data else ""
             temp_str = f"{data['temp_pico']} °C{umbral_str}"
             self.data_recvd_peak.emit(tiempo_str, temp_str)
