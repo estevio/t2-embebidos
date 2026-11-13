@@ -96,7 +96,7 @@ class AppGraficoTemp(QWidget):
     @pyqtSlot(float)
     def update_point(self, val: float):
         self.ui.title.setText(f"Temperatura: {val:.2f} °C")
-        self.graf.add_point(val
+        self.graf.add_point(val)
 
     def addPico(self, tiempo: str, temp: str):
         r = self.ui.tableWidget_picos.rowCount()
