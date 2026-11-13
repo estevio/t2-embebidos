@@ -207,7 +207,7 @@ void t_enqueue(TQueue *q, double temp, TickType_t tick) {
 
 /* saca de la cola toda temperatura que haya sido medida antes de ticks */
 // ticks debe ser el tiempo de la ultima medicion menos los ticks correspondientes a la ventana actual
-void t_dequeue(TQueue *q, TickType_t ticks) {
+void t_dequeue(TQueue *q, TickType_t current_ticks, TickType_t window_ticks) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
         //printf("fst-ticks: %u\tticks: %u\n", (unsigned int) q->ticks[fst], (unsigned int) ticks);
         while (q->count > 0 && (current_ticks - q->ticks[q->head]) >= window_ticks) {
@@ -216,13 +216,12 @@ void t_dequeue(TQueue *q, TickType_t ticks) {
             q->head = (q->head + 1) % TQUEUE_SIZE;
             q->count--;
         }
-        q->head = fst;
         xSemaphoreGive(q->m);
     }
 }
 
 /* calcula el promedio de las mediciones dentro de la cola */
-Average t_queue_avg(TQueue *q, int expected_size, TickType_t window_ticks) {
+Average t_queue_avg(TQueue *q, TickType_t current_ticks, TickType_t window_ticks) {
     Average res = { .avg = -1000, .ventana_completa = false };;
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
         if (q->count > 0) {
@@ -467,7 +466,7 @@ Medicion calc_medicion(uint32_t temp_adc, uint32_t press_adc, uint16_t hum_adc, 
         TickType_t window_ticks = pdMS_TO_TICKS(gui_conf->ventana * 1000);
         if (gui_conf->h_temp || gui_conf->h_avg || gui_conf->h_pico) {
             t_enqueue(tq, redondear(temp_comp), ticks);
-            t_dequeue(tq, first, window_ticks);
+            t_dequeue(tq, ticks, window_ticks);
 
             if (gui_conf->h_temp) 
                 res.temp = redondear(temp_comp);
@@ -735,30 +734,29 @@ void read_data(void *a) {
 
 }
 
-ConfigMsg *find_config_msg(char* msg) {
+typedef struct {
+    int x;
+    int y;
+} Tup;
+
+Tup find_config_msg(char* msg) {
     int max_len = strlen(msg);
     int beg = strcspn(msg, "{");
     int end = strcspn(msg, "}");
-    ConfigMsg *ret = malloc(sizeof(ConfigMsg));
+    Tup ret;
+    ret.x = -1;
+    ret.y = -1;
     if (beg == max_len) {
         msg[0] = '\0';
-        ret->valid = false;
         return ret;
     }
     else if (end == max_len) {
-        if (beg > 0) {
-            char aux[max_len];
-            strncpy(aux, (msg + beg), max_len);
-            strncpy(msg, aux, max_len);
-        }
-        ret->valid = false;
+        ret.x = beg;
         return ret;
     }
     else {
-        char aux[max_len];
-        strncpy(aux, (msg + beg), max_len);
-        strncpy(msg, aux, (end - beg + 1));
-        ret->valid = true;
+        ret.x = beg;
+        ret.y = end;
         return ret;
     }
     
@@ -844,22 +842,36 @@ void receive_uart(void *a) {
             // if (strlen(texto) >= cach_size - strlen(cache))  // reacomodar cache
             strncat(cache, texto, 255);
 
-            ConfigMsg *conf = (ConfigMsg *) malloc(sizeof(ConfigMsg));
-            conf = find_config_msg(cache);
-            bool cond = conf->valid;
+            Tup ind = find_config_msg(cache);
+
+            // actualizar cache
+            if (ind.x > 0) {
+                char aux[256];
+                strncpy(aux, cache + ind.x, 255);
+                strncpy(cache, aux, 255);
+            }
+
+            bool cond = ind.y > -1 && ind.x > -1;
             
             while (cond) {
                 // modificar configuracion
-                conf = find_config_msg(cache);
-                cond = conf->valid;
-                conf->valid = change_config(conf);
-                char *ack =  ack_to_json(*conf);
+                char json[256];
+                int len = ind.y - ind.x;
+                if (len < 0) len = 255;
+                strncpy(json, cache, len);
+                ConfigMsg conf = config_from_json(json);
+                conf.valid = change_config(&conf);
+                char *ack =  ack_to_json(conf);
                 uint8_t *ack_bytes = (uint8_t *) ack;
                 if (ack != NULL) {
                     uart_write_bytes(UART_PORT_NUM, ack_bytes, strlen(ack) * sizeof(char));
                 }
+                ind = find_config_msg(cache);
+                cond = ind.y > -1 && ind.x > -1;
             }
         }
+
+        vTaskDelay(100);
     }
 }
 
