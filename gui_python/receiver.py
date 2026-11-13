@@ -35,6 +35,7 @@ class DataReceiver(QObject):
     def receiver_loop(self):
         
         PAQUETE_SIZE = 8
+        cach = b""
         
         while True:
             
@@ -47,7 +48,6 @@ class DataReceiver(QObject):
             if self.conectado == False:
                 continue
 
-            cach = b""
             try:
                 if self.ser.in_waiting >= PAQUETE_SIZE:
 
@@ -55,12 +55,15 @@ class DataReceiver(QObject):
 
                     beg = cach.find(b"{\"tipo")
                     end = cach.find(b"}")
+                    # print(f"beg: {beg}\tend: {end}\tcach: {cach.decode()}")
                     if beg > -1 and end > -1:
-                        msg = cach[beg, end+1]
-                        cach = cach[end+2,]
+                        msg = cach[beg: end+1]
+                        #print(f"msg:{msg.decode()}")
+                        cach = cach[end+1:]
+                        #print(f"cach:{cach.decode()}")
                         self.decode_uart(msg)
-            except:
-                print("Error en receiver loop D:")
+            except Exception as e:
+                print(f"Error en receiver loop {e}")
 
             
     def checksum(self, msg: bytes):

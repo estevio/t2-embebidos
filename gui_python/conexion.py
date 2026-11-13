@@ -21,7 +21,7 @@ class AppConexion(QWidget):
         self.ui.comboBox_puerto.addItem("Seleccione un puerto")
         for p in self.available_ports:
             if "COM" in p.device or "USB" in p.device:
-                self.ui.comboBox_puerto.addItem(p.name)
+                self.ui.comboBox_puerto.addItem(p.device)
         self.ui.comboBox_puerto.setCurrentText("Seleccione un puerto")
 
         # añadir opciones de baud rate

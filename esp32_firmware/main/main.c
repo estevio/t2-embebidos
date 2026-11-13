@@ -661,9 +661,10 @@ void read_data(void *a) {
 
     uint8_t buf[2];
 
-    for (uint32_t i = 0; i < 100; i++) {
+    //for (uint32_t i = 0; i < 100; i++) {
+    while (true) {
 
-        printf("%d:\t", (int) i);
+        //printf("%d:\t", (int) i);
 
         buf[0] = BME688_CTRL_MEAS_ADDR;
         buf[1] = (0x1 << 5) | (0x1 << 2) | 0x1;
