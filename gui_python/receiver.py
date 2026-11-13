@@ -20,6 +20,7 @@ class DataReceiver(QObject):
     ventana_changed = pyqtSignal(str)
     toggle_envio = pyqtSignal(int, bool)
     toggle_habilitar = pyqtSignal(int, bool)
+    request_full_data_config = pyqtSignal()
 
     error_msg = pyqtSignal(str)
 
@@ -29,12 +30,18 @@ class DataReceiver(QObject):
 
         self.port = "Seleccione un puerto"
         self.baud = 115200
-        self.ser = None
+        self.ser: serial.Serial = None
         self.conectado = False
 
     def receiver_loop(self):
-
+        
+        PAQUETE_SIZE = 8
+        cach = b""
+        
         while True:
+            while not self.command_queue.empty():
+                    command = self.command_queue.get_nowait()
+                    command()
             if self.conectado and self.ser is not None and self.ser.is_open:
                 try:
                     if self.ser.in_waiting > 0:
@@ -57,14 +64,52 @@ class DataReceiver(QObject):
             else:
                 time.sleep(0.05)
 
-    def send_uart(self):
-        pass
+            try:
+                if self.ser.in_waiting >= PAQUETE_SIZE:
+
+                    cach += self.ser.read(PAQUETE_SIZE)
+
+                    beg = cach.find(b"{\"tipo")
+                    end = cach.find(b"}")
+                    # print(f"beg: {beg}\tend: {end}\tcach: {cach.decode()}")
+                    if beg > -1 and end > -1:
+                        msg = cach[beg: end+1]
+                        #print(f"msg:{msg.decode()}")
+                        cach = cach[end+1:]
+                        #print(f"cach:{cach.decode()}")
+                        self.decode_uart(msg)
+            except Exception as e:
+                print(f"Error en receiver loop {e}")
+
+            
+    def checksum(self, msg: bytes):
+        chk = 0
+        for character in msg:
+            chk ^= ord(character)
+        return chk
+
+    def send_uart(self, msg: str):
+
+        # revisar si esta conectado
+        if not self.conectado:
+            return
+        # sino, añadir un comando que envia la config al esp
+        def command():
+            msg_to_send = msg.encode()
+            #check = self.checksum(msg_to_send)
+            #msg_to_send = str(check).encode() + msg_to_send
+            try:
+                self.ser.write(msg_to_send)
+            except:
+                self.error_msg.emit(f"Error al enviar mensaje de configuracion")
+        self.command_queue.put(command)
 
     def decode_uart(self, line: str):
         try:
             data = json.loads(line)
         except json.JSONDecodeError:
-            self.error_msg.emit("Error: JSON invalido recibido")
+            # self.error_msg.emit("Error: JSON invalido recibido")
+            print("Error: JSON invalido recibido")
             return
 
         tipo = data.get("tipo")
@@ -90,14 +135,19 @@ class DataReceiver(QObject):
         var = 1: humedad;
         var = 2: presion
         """
-        nombres = ["temp", "hum", "pres"]
-        msg_json = self.config_to_json("habilitar", nombres[var], val)
-        self.command_queue.put(msg_json)
-        self.send_uart()
-
         # mientras no haya conexion real
         if not self.conectado:
             self.set_envio(var, val)
+            return
+        
+        nombres = ["temp", "hum", "pres"]
+        msg_json = self.config_to_json("habilitar", nombres[var], val)
+
+        def command():
+            self.send_uart(msg_json)
+        self.command_queue.put(command)
+
+        
 
     # recibe la confirmacion de la esp
     def set_envio(self, var: int, val: bool):
@@ -111,26 +161,34 @@ class DataReceiver(QObject):
 
     @pyqtSlot(int, bool)
     def request_set_habilitar(self, var: int, val: bool):
-        nombres = ["avg", "pico"]
-        msg_json = self.config_to_json("habilitar", nombres[var], val)
-        self.command_queue.put(msg_json)
-        self.send_uart()
-
         if not self.conectado:
             self.set_habilitar(var, val)
+            return
 
+        nombres = ["avg", "pico"]
+        msg_json = self.config_to_json("habilitar", nombres[var], val)
+
+        def command():
+            self.send_uart(msg_json)
+        self.command_queue.put(command)
+
+        
     def set_habilitar(self, var: int, b: bool):
 
         self.toggle_habilitar.emit(var, b)
 
     @pyqtSlot(str)
     def request_set_frecuencia_muestreo(self, v: str):
-        msg_json = self.config_to_json("frec_muestreo", float(v))
-        self.command_queue.put(msg_json)
-        self.send_uart()
-
         if not self.conectado:
             self.set_frecuencia_muestreo(v)
+            return
+        
+        msg_json = self.config_to_json("frec_muestreo", float(v))
+        def command():
+            self.send_uart(msg_json)
+        self.command_queue.put(command)
+
+        
 
     def set_frecuencia_muestreo(self, v: str):
         #print("llamando a set_frecuencia desde receiver")
@@ -138,24 +196,33 @@ class DataReceiver(QObject):
 
     @pyqtSlot(str)
     def request_set_ventana(self, v: str):
-        msg_json = self.config_to_json("ventana_avg", int(v))
-        self.command_queue.put(msg_json)
-        self.send_uart()
-
         if not self.conectado:
             self.set_ventana(v)
+            return
+        
+        msg_json = self.config_to_json("ventana_avg", int(v))
+
+        def command():
+            self.send_uart(msg_json)
+        self.command_queue.put(command)
+
+        
 
     def set_ventana(self, v: str):
         self.ventana_changed.emit(v)
 
     @pyqtSlot(float)
     def request_set_umbral(self, v: float):
-        msg_json = self.config_to_json("umbral", round(float(v), 1))
-        self.command_queue.put(msg_json)
-        self.send_uart()
-
         if not self.conectado:
             self.set_umbral(v)
+            return
+        
+        msg_json = self.config_to_json("umbral", round(float(v), 1))
+        def command():
+            self.send_uart(msg_json)
+        self.command_queue.put(command)
+
+        
 
     def set_umbral(self, v: float):
         #print("llamando a set_umbral desde reciever")
@@ -171,28 +238,28 @@ class DataReceiver(QObject):
 
     @pyqtSlot()
     def conectar(self):
-
-        if self.conectado:
-            if self.ser:
-                self.ser.close()
-            self.ser = None
-            self.conectado = False
-            self.toggle_conectar.emit()
-            self.status_recvd.emit("Desconectado")
-        elif self.port == "Seleccione un puerto":
-            self.error_msg.emit("Seleccione un puerto válido")
-        else:
-            try:
-                self.ser = serial.Serial(self.port, self.baud, timeout=0.2)
-                self.conectado = True
-                self.toggle_conectar.emit()
-                self.status_recvd.emit(f"Conectado en {self.port} ({self.baud} bps)")
-            except:
-                self.error_msg.emit("Error de conexión: {e}")
+        def command():
+            if self.conectado:
+                if self.ser:
+                    self.ser.close()
                 self.ser = None
                 self.conectado = False
-                self.status_recvd.emit("Error de conexión")
-
+                self.toggle_conectar.emit()
+                self.status_recvd.emit("Desconectado")
+            elif self.port == "Seleccione un puerto":
+                self.error_msg.emit("Seleccione un puerto válido")
+            else:
+                try:
+                    self.ser = serial.Serial(self.port, self.baud, timeout=0.2)
+                    self.conectado = True
+                    self.toggle_conectar.emit()
+                    self.status_recvd.emit(f"Conectado en {self.port} ({self.baud} bps)")
+                except:
+                    self.error_msg.emit("Error de conexión: {e}")
+                    self.ser = None
+                    self.conectado = False
+                    self.status_recvd.emit("Error de conexión")
+        self.command_queue.put(command)
     # From - To JSON
 
     def config_to_json(self, canal: str, valor, val_bool: bool = None) -> str:
@@ -273,9 +340,36 @@ class DataReceiver(QObject):
         if data.get("tipo") != "pico":
             return
 
+
         if "temp_pico" in data:
             tiempo_str = str(data.get("tiempo", 0))
             tiempo_str = f"{float(t_ms)/1000.0:.2f} s"
             umbral_str = f" (umbral {data.get('umbral')} °C)" if "umbral" in data else ""
             temp_str = f"{data['temp_pico']} °C{umbral_str}"
             self.data_recvd_peak.emit(tiempo_str, temp_str)
+
+    @pyqtSlot(dict)
+    def get_full_data_config(self, data: dict):
+
+        options = ["temp", "hum", "pres", "avg", "pico"]
+        for var in options:
+            set_to = var in data["habilitar"]
+            def command():
+                msg = self.config_to_json("habilitar", valor=var, val_bool=set_to)
+                self.send_uart(msg)
+            self.command_queue.put(command)
+
+        def command():
+            msg = self.config_to_json("ventana_avg", data["ventana_avg"])
+            self.send_uart(msg)
+        self.command_queue.put(command)
+
+        def command():
+            msg = self.config_to_json("frec_muestreo", data["frec_muestreo"])
+            self.send_uart(msg)
+        self.command_queue.put(command)
+
+        def command():
+            msg = self.config_to_json("umbral_pico", data["umbral_pico"])
+            self.send_uart(msg)
+        self.command_queue.put(command)

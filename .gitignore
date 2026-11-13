@@ -247,3 +247,5 @@ Desktop.ini
 *.map
 sasc_*.json
 
+# workspace (magda)
+t2-embebidos.code-workspace
