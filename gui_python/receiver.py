@@ -42,6 +42,7 @@ class DataReceiver(QObject):
             while not self.command_queue.empty():
                 command = self.command_queue.get_nowait()
                 command()
+
         #     if self.conectado and self.ser is not None and self.ser.is_open:
         #         try:
         #             if self.ser.in_waiting > 0:
@@ -65,27 +66,51 @@ class DataReceiver(QObject):
         #     else:
         #         time.sleep(0.05)
 
-            if self.conectado == False:
+            if not self.conectado or self.ser is None or not self.ser.is_open:
+                cach = b""
+                time.sleep(0.05)  # Evita que se congele la pantalla en negro al iniciar
                 continue
 
             try:
-                if self.ser.in_waiting >= PAQUETE_SIZE:
+                waiting = self.ser.in_waiting
+                if waiting > 0:
+                    # Leer en bloques de PAQUETE_SIZE o lo que haya disponible
+                    to_read = PAQUETE_SIZE if waiting >= PAQUETE_SIZE else waiting
+                    cach += self.ser.read(to_read)
 
-                    cach += self.ser.read(PAQUETE_SIZE)
+                    while True:
+                        beg = cach.find(b'{"tipo')
+                        if beg == -1:
+                            # Conservar últimos bytes por si '{"tipo' llegó cortado a la mitad
+                            if len(cach) > 16:
+                                cach = cach[-8:]
+                            break
 
-                    beg = cach.find(b"{\"tipo")
-                    end = cach.find(b"}")
-                    # print(f"beg: {beg}\tend: {end}\tcach: {cach.decode()}")
-                    if beg > -1 and end > -1:
-                        msg = cach[beg: end+1]
-                        print(f"msg:{msg.decode()}")
-                        cach = cach[end+1:]
-                        print(f"cach:{cach.decode()}")
-                        self.decode_uart(msg)
+                        # Buscar el '}' de cierre DESPUÉS de beg
+                        end = cach.find(b"}", beg)
+                        if end == -1:
+                            if beg > 0:
+                                cach = cach[beg:]
+                            break
+
+                        msg = cach[beg : end + 1]
+                        cach = cach[end + 1 :]
+                        self.decode_uart(msg.decode("utf-8", errors="ignore"))
+                else:
+                    time.sleep(0.005)
+            except (serial.SerialException, OSError) as e:
+                self.conectado = False
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+                self.ser = None
+                self.toggle_conectar.emit()
+                self.status_recvd.emit("Desconectado (puerto perdido)")
+                self.error_msg.emit(f"Se perdió la conexión serial con el ESP32: {e}")
             except Exception as e:
-                print(f"Error en receiver loop {e}")
+                print(f"Error en receiver loop: {e}")
 
-            
     def checksum(self, msg: bytes):
         chk = 0
         for character in msg:
@@ -260,8 +285,9 @@ class DataReceiver(QObject):
                     self.conectado = True
                     self.toggle_conectar.emit()
                     self.status_recvd.emit(f"Conectado en {self.port} ({self.baud} bps)")
-                except:
-                    self.error_msg.emit("Error de conexión: {e}")
+                    self.request_full_data_config.emit()
+                except Exception as e:
+                    self.error_msg.emit(f"Error de conexión: {e}")
                     self.ser = None
                     self.conectado = False
                     self.status_recvd.emit("Error de conexión")
@@ -331,7 +357,10 @@ class DataReceiver(QObject):
             self.data_recvd_hum.emit(float(data["hum"]))
         if "pres" in data:
             self.data_recvd_pres.emit(float(data["pres"]))
-        if "avg" in data:
+        if "temp_avg_c" in data:
+            completa = bool(data.get("ventana_completa", True))
+            self.data_recvd_avg.emit(float(data["temp_avg_c"]), completa)
+        elif "avg" in data:
             completa = bool(data.get("ventana_completa", True))
             self.data_recvd_avg.emit(float(data["avg"]), completa)
 
@@ -346,7 +375,6 @@ class DataReceiver(QObject):
         if data.get("tipo") != "pico":
             return
 
-
         if "temp_pico" in data:
             tiempo_str = str(data.get("tiempo", 0))
             tiempo_str = f"{float(tiempo_str)/1000.0:.2f} s"
@@ -356,26 +384,12 @@ class DataReceiver(QObject):
 
     @pyqtSlot(dict)
     def get_full_data_config(self, data: dict):
-
         options = ["temp", "hum", "pres", "avg", "pico"]
         for var in options:
             set_to = var in data["habilitar"]
-            def command():
-                msg = self.config_to_json("habilitar", valor=var, val_bool=set_to)
-                self.send_uart(msg)
-            self.command_queue.put(command)
-
-        def command():
-            msg = self.config_to_json("ventana_avg", data["ventana_avg"])
+            msg = self.config_to_json("habilitar", valor=var, val_bool=set_to)
             self.send_uart(msg)
-        self.command_queue.put(command)
 
-        def command():
-            msg = self.config_to_json("frec_muestreo", data["frec_muestreo"])
-            self.send_uart(msg)
-        self.command_queue.put(command)
-
-        def command():
-            msg = self.config_to_json("umbral_pico", data["umbral_pico"])
-            self.send_uart(msg)
-        self.command_queue.put(command)
+        self.send_uart(self.config_to_json("ventana_avg", data["ventana_avg"]))
+        self.send_uart(self.config_to_json("frec_muestreo", data["frec_muestreo"]))
+        self.send_uart(self.config_to_json("umbral", round(float(data["umbral_pico"]), 1)))

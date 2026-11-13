@@ -144,13 +144,15 @@ typedef struct {
 
 /* Estructura que representa una cola de temperaturas con ticks asociados */
 typedef struct {
-    double temps[150];
-    TickType_t ticks[150];
+    double temps[TQUEUE_SIZE];
+    TickType_t ticks[TQUEUE_SIZE];
     int head;
     int tail;
     int count;
     double t_sum;
     bool in_peak;
+    bool has_first_tick;
+    TickType_t first_tick;
     SemaphoreHandle_t m;
 } TQueue;
 
@@ -184,12 +186,18 @@ void t_queue_init(TQueue *q) {
     q->count = 0;
     q->t_sum = 0.0;
     q->in_peak = false;
+    q->has_first_tick = false;
+    q->first_tick = 0;
     q->m = xSemaphoreCreateMutex();
 }
 
 /* encola temperaturas, despues se debera llamar a _dequeue */
 void t_enqueue(TQueue *q, double temp, TickType_t tick) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
+        if (!q->has_first_tick) {
+            q->first_tick = tick;
+            q->has_first_tick = true;
+        }
         if (q->count == TQUEUE_SIZE){
             q->t_sum -= q->temps[q->head];
             q->head = (q->head + 1) % TQUEUE_SIZE;
@@ -209,9 +217,7 @@ void t_enqueue(TQueue *q, double temp, TickType_t tick) {
 // ticks debe ser el tiempo de la ultima medicion menos los ticks correspondientes a la ventana actual
 void t_dequeue(TQueue *q, TickType_t current_ticks, TickType_t window_ticks) {
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        //printf("fst-ticks: %u\tticks: %u\n", (unsigned int) q->ticks[fst], (unsigned int) ticks);
         while (q->count > 0 && (current_ticks - q->ticks[q->head]) >= window_ticks) {
-            
             q->t_sum -= q->temps[q->head];
             q->head = (q->head + 1) % TQUEUE_SIZE;
             q->count--;
@@ -222,11 +228,10 @@ void t_dequeue(TQueue *q, TickType_t current_ticks, TickType_t window_ticks) {
 
 /* calcula el promedio de las mediciones dentro de la cola */
 Average t_queue_avg(TQueue *q, TickType_t current_ticks, TickType_t window_ticks) {
-    Average res = { .avg = -1000, .ventana_completa = false };;
+    Average res = { .avg = -1000, .ventana_completa = false };
     if (xSemaphoreTake(q->m, portMAX_DELAY) == pdTRUE) {
-        if (q->count > 0) {
-            // La ventana es completa si ya transcurrió al menos W desde la primera medición o desde el arranque
-            res.ventana_completa = (current_ticks >= window_ticks);
+        if (q->count > 0 && q->has_first_tick) {
+            res.ventana_completa = ((current_ticks - q->first_tick) >= window_ticks);
             res.avg = redondear(q->t_sum / (double)q->count);
         }
         xSemaphoreGive(q->m);
@@ -502,7 +507,7 @@ char *medicion_to_jsonl(Medicion med) {
         cJSON_AddNumberToObject(root, "pres", med.pres);
     }
     if (med.avg.avg != -1000) {
-        cJSON_AddNumberToObject(root, "avg", med.avg.avg);
+        cJSON_AddNumberToObject(root, "temp_avg_c", med.avg.avg);
         cJSON_AddBoolToObject(root, "ventana_completa", med.avg.ventana_completa);
     }
 
@@ -656,37 +661,27 @@ char *ack_to_json(ConfigMsg cfg) {
    (y TODO: enviarlas a la gui) segun la configuracion gui_conf,
    es una xTask */
 void read_data(void *a) {
-
-    /* Read data */
     TickType_t previous_time = xTaskGetTickCount();
-
     uint8_t buf[2];
 
-    //for (uint32_t i = 0; i < 100; i++) {
     while (true) {
-
-        //printf("%d:\t", (int) i);
-
         buf[0] = BME688_CTRL_MEAS_ADDR;
         buf[1] = (0x1 << 5) | (0x1 << 2) | 0x1;
         if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
             ESP_ERROR_CHECK(i2c_master_transmit(s_conf->dev_handle, buf, 2, -1));
             xSemaphoreGive(mutex);
         }
-        
 
         uint8_t data[BME688_DATA_LEN];
         bool ready = false;
 
         for (uint32_t tries = 0; tries < 20; tries++) {
             vTaskDelay(pdMS_TO_TICKS(10));
-
             buf[0] = BME688_MEAS_STATUS_0_ADDR;
             if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
                 ESP_ERROR_CHECK(i2c_master_transmit_receive(s_conf->dev_handle, buf, 1, data, BME688_DATA_LEN, -1));
                 xSemaphoreGive(mutex);
             }
-            
 
             if ((data[0] & BME688_STATUS_NEW_DATA) && !(data[0] & BME688_STATUS_MEASURING)) {
                 ready = true;
@@ -696,12 +691,14 @@ void read_data(void *a) {
 
         if (!ready) {
             ESP_LOGE(TAG, "timeout de medida\n");
+            const char *err_msg = "{\"tipo\":\"estado\",\"estado\":\"error_sensor\",\"msg\":\"Timeout de lectura en BME688\"}\n";
+            uart_write_bytes(UART_PORT_NUM, err_msg, strlen(err_msg));
         } else {
             uint32_t press_adc = ((uint32_t)data[2] << 12) | ((uint32_t)data[3] << 4) | (data[4] >> 4);
             uint32_t temp_adc  = ((uint32_t)data[5] << 12) | ((uint32_t)data[6] << 4) | (data[7] >> 4);
             uint16_t hum_adc   = (uint16_t)((data[8] << 8) | data[9]);
 
-            Medicion med = calc_medicion(temp_adc, press_adc, hum_adc, previous_time); // es previous time ??
+            Medicion med = calc_medicion(temp_adc, press_adc, hum_adc, previous_time);
             Pico p;
             p.valid = false;
             if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
@@ -709,29 +706,35 @@ void read_data(void *a) {
                 xSemaphoreGive(gui_conf->m);
             }
             char *json_med = medicion_to_jsonl(med);
-            uart_write_bytes(UART_PORT_NUM, json_med, sizeof(char)*strlen(json_med));
+            if (json_med != NULL) {
+                uart_write_bytes(UART_PORT_NUM, json_med, strlen(json_med));
+                uart_write_bytes(UART_PORT_NUM, "\n", 1);
+                free(json_med); // Liberar memoria de cJSON
+            }
 
             if (p.valid) {
                 char *json_pic = pico_to_jsonl(p);
-                uart_write_bytes(UART_PORT_NUM, json_pic, sizeof(char)*strlen(json_pic));
+                if (json_pic != NULL) {
+                    uart_write_bytes(UART_PORT_NUM, json_pic, strlen(json_pic));
+                    uart_write_bytes(UART_PORT_NUM, "\n", 1);
+                    free(json_pic); // Liberar memoria de cJSON
+                }
             }
-            
         }
         float frec = 1;
         if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
             frec = gui_conf->frec;
             xSemaphoreGive(gui_conf->m);
         }
-        float ms = 1000.0 / frec;
+        float ms = 1000.0f / frec;
         xTaskDelayUntil(&previous_time, pdMS_TO_TICKS(ms));
     }
+
     if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
         deinit_sensor();
         xSemaphoreGive(mutex);
     }
-    
     vTaskDelete(NULL);
-
 }
 
 typedef struct {
@@ -739,27 +742,19 @@ typedef struct {
     int y;
 } Tup;
 
-Tup find_config_msg(char* msg) {
-    int max_len = strlen(msg);
-    int beg = strcspn(msg, "{");
-    int end = strcspn(msg, "}");
-    Tup ret;
-    ret.x = -1;
-    ret.y = -1;
-    if (beg == max_len) {
+Tup find_config_msg(char *msg) {
+    Tup ret = { .x = -1, .y = -1 };
+    char *beg_ptr = strchr(msg, '{');
+    if (beg_ptr == NULL) {
         msg[0] = '\0';
         return ret;
     }
-    else if (end == max_len) {
-        ret.x = beg;
-        return ret;
+    ret.x = (int)(beg_ptr - msg);
+    char *end_ptr = strchr(beg_ptr, '}');
+    if (end_ptr != NULL) {
+        ret.y = (int)(end_ptr - msg);
     }
-    else {
-        ret.x = beg;
-        ret.y = end;
-        return ret;
-    }
-    
+    return ret;
 }
 
 /*
@@ -773,7 +768,6 @@ typedef struct {
     float umbral;
 } ConfigMsg;
  */
-
 bool change_config(ConfigMsg *conf) {
     if (!conf->valid) {
         return false;
@@ -781,38 +775,50 @@ bool change_config(ConfigMsg *conf) {
     bool ret_val = false;
     if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
 
-        if (strncmp(conf->canal, "frec_muestreo", 16)) {
-            gui_conf->frec = conf->frec;
-            ret_val = true;
+        if (strncmp(conf->canal, "frec_muestreo", 16) == 0) {
+            if (conf->frec == 0.5f || conf->frec == 1.0f || conf->frec == 2.0f || conf->frec == 5.0f) {
+                gui_conf->frec = conf->frec;
+                ret_val = true;
+            }
         }
-        else if (strncmp(conf->canal, "ventana_avg", 16)) {
-            gui_conf->ventana = conf->ventana;
-            ret_val = true;
+        else if (strncmp(conf->canal, "ventana_avg", 16) == 0) {
+            if (conf->ventana == 5 || conf->ventana == 10 || conf->ventana == 30 || conf->ventana == 60) {
+                gui_conf->ventana = conf->ventana;
+                ret_val = true;
+            }
         }
-        else if (strncmp(conf->canal, "umbral", 16)) {
-            gui_conf->umbral = conf->umbral;
-            ret_val = true;
+        else if (strncmp(conf->canal, "umbral", 16) == 0) {
+            if (conf->umbral >= -40.0f && conf->umbral <= 85.0f) {
+                gui_conf->umbral = redondear(conf->umbral);
+                ret_val = true;
+            }
         }
-        else if (strncmp(conf->canal, "habilitar", 16)) {
+        else if (strncmp(conf->canal, "habilitar", 16) == 0) {
             char *var = conf->habilitar;
             bool val = conf->val;
-            if (strncmp(var, "temp", 10)) {
-                gui_conf->h_temp = val;
-                ret_val = true;
+            if (strncmp(var, "temp", 10) == 0) {
+                if (val || gui_conf->h_hum || gui_conf->h_pres) {
+                    gui_conf->h_temp = val;
+                    ret_val = true;
+                }
             }
-            if (strncmp(var, "pres", 10)) {
-                gui_conf->h_pres = val;
-                ret_val = true;
+            else if (strncmp(var, "pres", 10) == 0) {
+                if (val || gui_conf->h_temp || gui_conf->h_hum) {
+                    gui_conf->h_pres = val;
+                    ret_val = true;
+                }
             }
-            if (strncmp(var, "hum", 10)) {
-                gui_conf->h_hum = val;
-                ret_val = true;
+            else if (strncmp(var, "hum", 10) == 0) {
+                if (val || gui_conf->h_temp || gui_conf->h_pres) {
+                    gui_conf->h_hum = val;
+                    ret_val = true;
+                }
             }
-            if (strncmp(var, "avg", 10)) {
+            else if (strncmp(var, "avg", 10) == 0) {
                 gui_conf->h_avg = val;
                 ret_val = true;
             }
-            if (strncmp(var, "pico", 10)) {
+            else if (strncmp(var, "pico", 10) == 0) {
                 gui_conf->h_pico = val;
                 ret_val = true;
             }
@@ -824,59 +830,63 @@ bool change_config(ConfigMsg *conf) {
 }
 
 void receive_uart(void *a) {
+    int cach_size = 512;
+    int data_size = 128;
 
-    int cach_size = 256;
-    int data_size = cach_size/2;
-
-    char *cache = (char *) malloc(cach_size*sizeof(char));
+    char *cache = (char *) malloc(cach_size * sizeof(char));
+    uint8_t *data = (uint8_t *) malloc(data_size * sizeof(uint8_t));
+    if (cache == NULL || data == NULL) {
+        if (cache) free(cache);
+        if (data) free(data);
+        vTaskDelete(NULL);
+        return;
+    }
     cache[0] = '\0';
-    uint8_t *data = (uint8_t *) malloc(data_size);
 
     while (true) {
-        
-        int len = uart_read_bytes(UART_PORT_NUM, data, (data_size-1), pdMS_TO_TICKS(100));
+        int len = uart_read_bytes(UART_PORT_NUM, data, (data_size - 1), pdMS_TO_TICKS(50));
 
         if (len > 0) {
             data[len] = '\0';
-            char *texto = (char *) data;
-            // if (strlen(texto) >= cach_size - strlen(cache))  // reacomodar cache
-            strncat(cache, texto, 255);
+            size_t avail = cach_size - strlen(cache) - 1;
+            if ((size_t)len > avail) {
+                cache[0] = '\0';
+                avail = cach_size - 1;
+            }
+            strncat(cache, (char *)data, avail);
 
             Tup ind = find_config_msg(cache);
 
-            // actualizar cache
-            if (ind.x > 0) {
-                char aux[256];
-                strncpy(aux, cache + ind.x, 255);
-                strncpy(cache, aux, 255);
-            }
+            while (ind.x > -1 && ind.y > -1) {
+                int msg_len = ind.y - ind.x + 1;
+                if (msg_len > 0 && msg_len < 256) {
+                    char json[256];
+                    memcpy(json, cache + ind.x, msg_len);
+                    json[msg_len] = '\0';
 
-            bool cond = ind.y > -1 && ind.x > -1;
-            
-            while (cond) {
-                // modificar configuracion
-                char json[256];
-                int len = ind.y - ind.x;
-                if (len < 0) len = 255;
-                strncpy(json, cache, len);
-                ConfigMsg conf = config_from_json(json);
-                conf.valid = change_config(&conf);
-                char *ack =  ack_to_json(conf);
-                uint8_t *ack_bytes = (uint8_t *) ack;
-                if (ack != NULL) {
-                    uart_write_bytes(UART_PORT_NUM, ack_bytes, strlen(ack) * sizeof(char));
+                    ConfigMsg conf = config_from_json(json);
+                    conf.valid = change_config(&conf);
+                    char *ack = ack_to_json(conf);
+                    if (ack != NULL) {
+                        uart_write_bytes(UART_PORT_NUM, ack, strlen(ack));
+                        uart_write_bytes(UART_PORT_NUM, "\n", 1);
+                        free(ack); // Liberar memoria de cJSON
+                    }
                 }
+                // Borrar de cache el mensaje que ya procesamos para que no se repita infinitamente
+                memmove(cache, cache + ind.y + 1, strlen(cache + ind.y + 1) + 1);
                 ind = find_config_msg(cache);
-                cond = ind.y > -1 && ind.x > -1;
             }
         }
-
-        vTaskDelay(100);
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
+
+    free(cache);
+    free(data);
+    vTaskDelete(NULL);
 }
 
-void app_main(void){
-
+void app_main(void) {
     mutex = xSemaphoreCreateMutex();
     s_conf = (ConfigSensor *) malloc(sizeof(ConfigSensor));
     cal = (Calib *) malloc(sizeof(Calib));
@@ -884,16 +894,21 @@ void app_main(void){
     t_queue_init(tq);
     gui_conf = (Config *) malloc(sizeof(Config));
     gui_conf->m = xSemaphoreCreateMutex();
-    gui_conf->frec = 1;
-    gui_conf->umbral = 27.0;
-    gui_conf->ventana = 5;
-    gui_conf->h_avg = gui_conf->h_pico = true;
+    gui_conf->frec = 1.0;
+    gui_conf->umbral = 28.0;
+    gui_conf->ventana = 10;
+    gui_conf->h_avg = false;
+    gui_conf->h_pico = false;
     gui_conf->h_temp = gui_conf->h_pres = gui_conf->h_hum = true;
 
     init_uart();
     init_sensor();
 
-    if (s_conf != NULL && s_conf->success == false) return;
+    if (s_conf != NULL && s_conf->success == false) {
+        const char *err_msg = "{\"tipo\":\"estado\",\"estado\":\"error_init\",\"msg\":\"Fallo al inicializar BME688\"}\n";
+        uart_write_bytes(UART_PORT_NUM, err_msg, strlen(err_msg));
+        return;
+    }
 
     xTaskCreate(read_data, "TaskReadData", 4096, NULL, 2, NULL);
     xTaskCreate(receive_uart, "TaskReceiveUart", 4096, NULL, 2, NULL);

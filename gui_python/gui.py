@@ -34,6 +34,10 @@ class GUI(QMainWindow):
         self.plot_temp.ui.label_media_2.hide()
         self.plot_temp.ui.tableWidget_picos.hide()
 
+        self.plot_temp = AppGraficoTemp("Temperatura")
+        self.plot_hum = AppGrafico("Humedad Relativa", "%HR")
+        self.plot_pres = AppGrafico("Presión", "hPa")
+
     @pyqtSlot(str)
     def error_popup(self, msg: str):
         self.dlg = QDialog(self)

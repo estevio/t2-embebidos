@@ -18,9 +18,9 @@ if __name__ == "__main__":
 
     # conexiones con graph
     # conectar recepcion de mediciones
-    receiver.data_recvd_temp.connect(gui.plot_temp.graf.add_point)
-    receiver.data_recvd_hum.connect(gui.plot_hum.graf.add_point)
-    receiver.data_recvd_pres.connect(gui.plot_pres.graf.add_point)
+    receiver.data_recvd_temp.connect(gui.plot_temp.update_point)
+    receiver.data_recvd_hum.connect(gui.plot_hum.update_point)
+    receiver.data_recvd_pres.connect(gui.plot_pres.update_point)
     receiver.data_recvd_avg.connect(gui.plot_temp.change_avg)
     receiver.data_recvd_peak.connect(gui.plot_temp.addPico)
 
@@ -51,9 +51,11 @@ if __name__ == "__main__":
     gui.conexion_config.ui.comboBox_puerto.currentTextChanged.connect(receiver.set_port)
     gui.conexion_config.ui.comboBox_baud_rate.currentTextChanged.connect(receiver.set_baud)
 
-    gui.data_config.request_frecuencia.connect(receiver.request_set_frecuencia_muestreo)
     gui.data_config.request_ventana.connect(receiver.request_set_ventana)
     receiver.ventana_changed.connect(gui.data_config.set_ventana)
+
+    receiver.request_full_data_config.connect(gui.data_config.emit_full_data_config)
+    gui.data_config.send_full_data_config.connect(receiver.get_full_data_config)
 
     window.statusBar().showMessage("Estado ESP32: Desconectado")
     receiver.status_recvd.connect(lambda s: window.statusBar().showMessage(f"Estado ESP32: {s}"))

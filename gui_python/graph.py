@@ -93,6 +93,11 @@ class AppGraficoTemp(QWidget):
         self.ui.tableWidget_picos.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.ui.tableWidget_picos.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
 
+    @pyqtSlot(float)
+    def update_point(self, val: float):
+        self.ui.title.setText(f"Temperatura: {val:.2f} °C")
+        self.graf.add_point(val
+
     def addPico(self, tiempo: str, temp: str):
         r = self.ui.tableWidget_picos.rowCount()
         self.ui.tableWidget_picos.insertRow(r)
@@ -142,7 +147,10 @@ class AppGraficoTemp(QWidget):
                 it.hide()
             if items[1-var][0].isHidden() and self.ui.GraphSpace.isHidden():
                 self.hide()
-
+    @pyqtSlot(float)
+    def update_point(self, val: float):
+        self.ui.title.setText(f"Temperatura: {val:.2f} °C")
+        self.graf.add_point(val)
 if __name__ == "__main__":
     app = QApplication([])
     app_graf = AppGraficoTemp()
