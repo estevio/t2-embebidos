@@ -48,7 +48,7 @@
 #define BUF_SIZE               (1024)
 
 
-#define redondear(v) round((v)*100.0)/100.0
+#define redondear(v) round((v)*10.0)/10.0
 
 #define TQUEUE_SIZE 310
 
@@ -602,7 +602,6 @@ ConfigMsg config_from_json(char *json) {
     cJSON *umb = cJSON_GetObjectItem(root, "umbral");
     if (umb != NULL) {
         if (!cJSON_IsNumber(umb)) {
-            printf("Error: umbral no es number\n");
             cJSON_Delete(root);
             return res;
         }
@@ -625,24 +624,27 @@ char *ack_to_json(ConfigMsg cfg) {
 
     if (!cfg.valid) {
         cJSON_AddStringToObject(root, "status", "error");
-        char *err_str = cJSON_PrintUnformatted(root);
-        cJSON_Delete(root);
-        return err_str;
+        // char *err_str = cJSON_PrintUnformatted(root);
+        // cJSON_Delete(root);
+        // return err_str;
+    }
+    else {
+        cJSON_AddStringToObject(root, "status", "ok");
     }
 
     // Actualizar gui_conf protegiendo con su mutex
     if (xSemaphoreTake(gui_conf->m, portMAX_DELAY) == pdTRUE) {
         if (strcmp(cfg.canal, "frec_muestreo") == 0) {
-            gui_conf->frec = cfg.frec;
+            if (cfg.valid) gui_conf->frec = cfg.frec;
             cJSON_AddNumberToObject(root, "frec_muestreo", cfg.frec);
         } else if (strcmp(cfg.canal, "ventana_avg") == 0) {
-            gui_conf->ventana = cfg.ventana;
+            if (cfg.valid) gui_conf->ventana = cfg.ventana;
             cJSON_AddNumberToObject(root, "ventana_avg", cfg.ventana);
         } else if (strcmp(cfg.canal, "umbral") == 0) {
-            gui_conf->umbral = redondear(cfg.umbral);
+            if (cfg.valid) gui_conf->umbral = redondear(cfg.umbral);
             cJSON_AddNumberToObject(root, "umbral", gui_conf->umbral);
-        } else if (strcmp(cfg.canal, "habilitar") == 0) {
-            if (strcmp(cfg.habilitar, "temp") == 0) gui_conf->h_temp = cfg.val;
+        } else if (strcmp(cfg.canal, "habilitar") == 0 && cfg.valid) {
+            if (strcmp(cfg.habilitar, "temp") == 0) {gui_conf->h_temp = cfg.val;}
             else if (strcmp(cfg.habilitar, "hum") == 0) gui_conf->h_hum = cfg.val;
             else if (strcmp(cfg.habilitar, "pres") == 0) gui_conf->h_pres = cfg.val;
             else if (strcmp(cfg.habilitar, "avg") == 0) gui_conf->h_avg = cfg.val;
@@ -654,7 +656,7 @@ char *ack_to_json(ConfigMsg cfg) {
         xSemaphoreGive(gui_conf->m);
     }
 
-    cJSON_AddStringToObject(root, "status", "ok");
+    // cJSON_AddStringToObject(root, "status", "ok");
     char *jsonl = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return jsonl;

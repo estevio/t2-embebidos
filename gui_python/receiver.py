@@ -305,8 +305,10 @@ class DataReceiver(QObject):
 
         if data.get("tipo") != "ack":
             return
-        if data.get("status") == "error":
-            self.error_msg.emit(f"Comando rechazado por ESP32: {data.get('msg', 'formato inválido')}")
+        status = data.get("status") == "ok"
+        if not status:
+            #self.error_msg.emit(f"Comando rechazado por ESP32: {data.get('msg', 'formato inválido')}")
+            self.error_msg.emit(f"Comando rechazado por ESP32: {json_str}")
             return
 
         if "frec_muestreo" in data:
@@ -376,9 +378,12 @@ class DataReceiver(QObject):
             set_to = var in data["habilitar"]
             msg = self.config_to_json("habilitar", valor=var, val_bool=set_to)
             self.send_uart(msg)
+            #time.sleep(1)
 
         msg = self.config_to_json("frec_muestreo", data["frec_muestreo"])
         self.send_uart(msg)
+        #time.sleep(1)
 
-        msg = self.config_to_json("umbral_pico", data["umbral_pico"])
+        msg = self.config_to_json("umbral", round(float(data["umbral_pico"]), 1))
         self.send_uart(msg)
+        #time.sleep(1)
