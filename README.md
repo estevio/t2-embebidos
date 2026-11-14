@@ -1,86 +1,42 @@
-# t2-embebidos
+# Tarea 2: Adquisición con BME688 y Procesamiento Local en ESP32
+**Curso:** CC5328-1 Sistemas Embebidos y Sensores — FCFM, Universidad de Chile  
+**Semestre:** 2026-2  
+**Profesor:** Luciano Radrigan | **Auxiliar:** Lucas Llort  
 
-## Protocolo
+---
 
-### GUI -> ESP
+## 📹 Video de Demostración
+* **Enlace directo al video:** Youtube:
 
-Envío de configuraciones
+---
 
-``
-{"tipo":"config"
-  "config": "config-tipo"
-  "config-tipo":"config-val}
-``
+## 1. Descripción General y Arquitectura del Sistema
 
-```
-{"tipo":"config", (config-tipo):(config-val)}
+El sistema implementa una estación de adquisición ambiental y procesamiento en el borde (*edge computing*) dividida en tres bloques principales:
 
-(config-tipo, config-val):
-    ("frec_muestreo", (0.5, 1, 2 o 5))
-    ("habilitar",("temp", "hum", "pres", "avg", "pico"))
-    ("ventana_avg", (5, 10, 30 o 60))
-    ("umbral_pico", (float))
-```
+1. **Sensor Físico (Bosch BME688):** Conectado al microcontrolador mediante el bus $I^2C$ a $400\text{ kHz}$. Provee mediciones crudas (ADC) de temperatura, humedad relativa y presión atmosférica, además de los coeficientes de calibración almacenados en su memoria no volátil (NVM). El calentador de gas se mantiene deshabilitado (`CTRL_GAS_0 = 0x08`, `CTRL_GAS_1 = 0x00`) para optimizar el tiempo de conversión de $T/H/P$.
+2. **Firmware Embebido (ESP32 / ESP-IDF en C):** Utiliza el sistema operativo en tiempo real **FreeRTOS** con dos tareas concurrentes (`TaskReadData` y `TaskReceiveUart`) sincronizadas mediante semáforos mutex (`SemaphoreHandle_t`). Ejecuta las fórmulas de compensación de punto flotante del fabricante, administra una cola circular temporal (`TQueue`) para el cálculo de la media móvil y la detección de máximos locales (picos) de temperatura, y se comunica mediante JSON Lines (JSONL) por UART0.
+3. **Aplicación de Escritorio (Python 3 / PyQt6):** Interfaz gráfica no bloqueante basada en una arquitectura Modelo-Vista-Controlador mediante señales y slots (`pyqtSignal` / `pyqtSlot`). La lectura y escritura serial (`pyserial`) se ejecuta en un hilo secundario (`threading.Thread` daemon) acoplado a una cola segura de comandos (`queue.Queue`), mientras que la visualización en tiempo real se realiza mediante `matplotlib` (`FigureCanvasQTAgg`).
 
-### ESP32 -> GUI
+---
 
-Envío de mediciones
+## 2. Estructura del Repositorio
 
-```
-{"tipo": "medicion","seq":(int),"tiempo":(int),
- "temp":(float),"hum":(float),"pres":(float),
- "avg":(float),"ventana_completa":(bool)}
-```
-
-Envío de picos de temperatura
-
-```
-{"tipo": "pico","tiempo":(int),
- "t_pico":(float),"umbral":(float)}
-```
-
-Confirmación de configuraciones
-
-``
-{"tipo":"ack","status":"ok","config":"config-tipo"
-  "config-tipo":"config-val}
-``
-
-```
-{"tipo":"ack","status":("ok" o "na"),(config):(config-val)}
-
-(config, config-val):
-    ("frec_muestreo", (0.5, 1, 2 o 5))
-    ("habilitar",("tem", "hum", "pre", "avg", "pic"))
-    ("ventana_avg", (5, 10, 30 o 60))
-    ("umbral_pico", (float))
-```
-
-``
-{"tipo":"config"
-  "config": "config-tipo"
-  "config-tipo":"config-val}
-``
-
-## TODO
-
-TODO magda
-  - conectar sin reiniciar
-  - leer desde uart (python)
-  - leer desde uart (C) 
-  - escribir a uart (pyton) 
-  - escribir a uart (C) 
-  - implementar cola de comandos
-  - manejar overflows ticks 
-  - manejar setteo de configuraciones sin haber establecido conexion
-
-TODO galindo
-  - config to json (python)
-  - ack from json (python)
-  - config from json (C)
-  - ack to json (C)
-  - medida from json (python)
-  - pico from json (python)
-
-
-  - revisar detecto de picos (C)
+```text
+.
+├── esp32_firmware/             # Proyecto ESP-IDF para el ESP32
+│   ├── CMakeLists.txt
+│   └── main/
+│       ├── CMakeLists.txt
+│       └── main.c              # Driver I2C BME688, TQueue, tareas FreeRTOS y parser cJSON
+├── gui_python/                 # Aplicación de escritorio PyQt6
+│   ├── main.py                 # Punto de entrada, instanciación de hilos y conexión de señales
+│   ├── gui.py                  # Ventana principal e integración de paneles y popups de error
+│   ├── conexion.py             # Widget de control de puerto COM/USB y Baud Rate
+│   ├── conf_datos.py           # Widget de configuración de T/H/P, Hz, ventana W y umbral
+│   ├── graph.py                # Lienzos de Matplotlib en tiempo real y tabla histórica de picos
+│   ├── receiver.py             # Hilo de comunicación UART, colas y serialización JSON
+│   ├── main_ui/                # Archivos de interfaz generados por Qt Designer
+│   └── widgets_ui/             # Sub-widgets generados por Qt Designer
+├── requirements.txt            # Dependencias de Python
+└── README.md                   # Documentación del proyecto
