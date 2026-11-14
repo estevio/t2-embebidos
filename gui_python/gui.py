@@ -21,8 +21,8 @@ class GUI(QMainWindow):
 
         # agregar gráficos
         self.plot_temp = AppGraficoTemp()
-        self.plot_hum = AppGrafico("Humedad Relativa")
-        self.plot_pres = AppGrafico("Presión")
+        self.plot_hum = AppGrafico("Humedad Relativa", "%HR")
+        self.plot_pres = AppGrafico("Presión", "hPa")
 
         self.main.graf_layout.addWidget(self.plot_temp)
         self.main.graf_layout.addWidget(self.plot_hum)
