@@ -249,23 +249,33 @@ class DataReceiver(QObject):
     def conectar(self):
         def command():
             if self.conectado:
-                if self.ser:
-                    self.ser.close()
-                self.ser = None
-                self.conectado = False
-                self.toggle_conectar.emit()
-                self.status_recvd.emit("Desconectado")
+                if self.ser and self.ser.is_open:
+                    try:
+                        self.ser.close()
+                        self.ser = None
+                        self.conectado = False
+                        self.toggle_conectar.emit()
+                        self.status_recvd.emit("Desconectado")
+                    except:
+                        self.error_msg.emit("Problemas al Desconectar")
             elif self.port == "Seleccione un puerto":
                 self.error_msg.emit("Seleccione un puerto válido")
             else:
                 try:
                     self.ser = serial.Serial(self.port, self.baud, timeout=0.2)
+                    # reseteo de la placa
+                    self.ser.dtr = False
+                    self.ser.rts = True
+                    time.sleep(0.1)
+                    self.ser.rts = False
+                    time.sleep(0.1)
+
                     self.conectado = True
                     self.toggle_conectar.emit()
                     self.status_recvd.emit(f"Conectado en {self.port} ({self.baud} bps)")
                     self.request_full_data_config.emit()
                 except Exception as e:
-                    self.error_msg.emit("Error de conexión: {e}")
+                    self.error_msg.emit(f"Error de conexión: {e}")
                     self.ser = None
                     self.conectado = False
                     self.status_recvd.emit("Error de conexión")

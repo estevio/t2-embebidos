@@ -143,6 +143,11 @@ class AppGraficoTemp(QWidget):
             if items[1-var][0].isHidden() and self.ui.GraphSpace.isHidden():
                 self.hide()
 
+    @pyqtSlot(float)
+    def update_point(self, val: float):
+        self.ui.title.setText(f"Temperatura: {val:.2f} °C")
+        self.graf.add_point(val)
+
 if __name__ == "__main__":
     app = QApplication([])
     app_graf = AppGraficoTemp()
